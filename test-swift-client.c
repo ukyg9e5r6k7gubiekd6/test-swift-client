@@ -8,61 +8,61 @@
 
 #include "swift-client.h"
 
-static size_t
-supply_data_from_file(void *ptr, size_t size, size_t nmemb, void *stream)
-{
-	return fread(ptr, size, nmemb, stream);
-}
+#if 0
+#define PROXY "socks5://127.0.0.1:8080/"
+#else
+#define PROXY NULL
+#endif
+#define SWIFT_ACCOUNT L"testaccount"
+#define SWIFT_CONTAINER L"testcontainer"
+#define SWIFT_OBJECT L"testobject"
+
+#define USAGE "Usage: %s <tenant-name> <username> <password>"
 
 static enum swift_error
-test_swift_client(swift_context_t *context)
+test_swift_client(swift_context_t *context, const char *keystone_url, const char *tenant_name, const char *username, const char *password)
 {
 	enum swift_error scerr;
-	CURLcode curl_err;
-	FILE *stream;
 
-	scerr = swift_set_hostname(context, "localhost");
+	scerr = swift_set_proxy(context, PROXY);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
 	}
 
-	scerr = swift_set_auth_token(context, "myauthtoken");
+	scerr = keystone_authenticate(context, keystone_url, tenant_name, username, password);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
 	}
 
-	scerr = swift_set_account(context, L"myaccount");
+	scerr = swift_set_container(context, SWIFT_CONTAINER);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
 	}
 
-	scerr = swift_set_container(context, L"mycontainer");
+	scerr = swift_create_container(context);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
 	}
 
-	scerr = swift_set_object(context, L"myobject");
+	scerr = swift_set_object(context, SWIFT_OBJECT);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
 	}
 
-	stream = fopen("testdata.txt", "rb");
-	if (NULL == stream) {
-		perror("fopen");
-		return SCERR_FILEIO_FAILED;
-	}
-
-	curl_err = curl_easy_setopt(context->pvt.curl, CURLOPT_READDATA, stream);
-	if (CURLE_OK != curl_err) {
-		return SCERR_FILEIO_FAILED;
-	}
-
-	scerr = swift_put(context, supply_data_from_file, 0, NULL, NULL);
+	scerr = swift_put_file(context, "testdata.txt", 0, NULL, NULL);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
 	}
 
-	fclose(stream);
+	scerr = swift_delete_object(context);
+	if (scerr != SCERR_SUCCESS) {
+		return scerr;
+	}
+
+	scerr = swift_delete_container(context);
+	if (scerr != SCERR_SUCCESS) {
+		return scerr;
+	}
 
 	return SCERR_SUCCESS;
 }
@@ -72,6 +72,11 @@ main(int argc, char **argv)
 {
 	swift_context_t swift;
 	enum swift_error scerr;
+
+	if (argc != 5) {
+		fprintf(stderr, USAGE, argv[0]);
+		return EXIT_FAILURE;
+	}
 
 	memset(&swift, 0, sizeof(swift));
 
@@ -93,7 +98,7 @@ main(int argc, char **argv)
 		return scerr;
 	}
 
-	scerr = test_swift_client(&swift);
+	scerr = test_swift_client(&swift, argv[1], argv[2], argv[3], argv[4]);
 	if (scerr != SCERR_SUCCESS) {
 		swift_end(&swift);
 		swift_global_cleanup();
