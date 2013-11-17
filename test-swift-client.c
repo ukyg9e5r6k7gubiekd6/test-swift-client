@@ -30,7 +30,7 @@ test_swift_client(swift_context_t *swift)
 		return scerr;
 	}
 
-	scerr = swift_create_container(swift);
+	scerr = swift_create_container(swift, 0, NULL, NULL);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
 	}
