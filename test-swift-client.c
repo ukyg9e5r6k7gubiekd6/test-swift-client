@@ -45,6 +45,11 @@ test_swift_client(swift_context_t *swift)
 		return scerr;
 	}
 
+	scerr = swift_get_file(swift, "testdata2.txt");
+	if (scerr != SCERR_SUCCESS) {
+		return scerr;
+	}
+
 	scerr = swift_delete_object(swift);
 	if (scerr != SCERR_SUCCESS) {
 		return scerr;
