@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <pthread.h>
 
 #include "keystone-client.h"
 #include "swift-client.h"
@@ -63,6 +64,44 @@ test_swift_client(swift_context_t *swift)
 	return SCERR_SUCCESS;
 }
 
+struct keystone_thread_args {
+	keystone_context_t *keystone;
+	const char *url;
+	const char *tenant;
+	const char *username;
+	const char *password;
+	const char *auth_token;
+	const char *swift_url;
+};
+
+static const char *
+keystone_thread_func(void *arg)
+{
+	struct keystone_thread_args *args = (struct keystone_thread_args *) arg;
+	enum keystone_error kserr;
+
+	kserr = keystone_start(args->keystone);
+	if (kserr != KSERR_SUCCESS) {
+		return NULL;
+	}
+	pthread_cleanup_push((void (*)(void *)) keystone_end, args->keystone);
+
+	kserr = keystone_set_debug(args->keystone, 1);
+	if (KSERR_SUCCESS == kserr) {
+		kserr = keystone_set_proxy(args->keystone, PROXY);
+	}
+	if (KSERR_SUCCESS == kserr) {
+		kserr = keystone_authenticate(args->keystone, args->url, args->tenant, args->username, args->password);
+	}
+	if (KSERR_SUCCESS == kserr) {
+		args->auth_token = keystone_get_auth_token(args->keystone);
+		args->swift_url = keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0);
+	}
+	pthread_cleanup_pop(1);
+
+	return NULL;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -70,7 +109,11 @@ main(int argc, char **argv)
 	keystone_context_t keystone;
 	enum swift_error scerr;
 	enum keystone_error kserr;
-	const char *swift_url;
+	struct keystone_thread_args keystone_args;
+	pthread_t keystone_thread;
+	pthread_attr_t keystone_thread_attr;
+	void *keystone_retval;
+	int ret;
 
 	if (argc != 5) {
 		fprintf(stderr, USAGE, argv[0]);
@@ -92,78 +135,68 @@ main(int argc, char **argv)
 	}
 	atexit(keystone_global_cleanup);
 
-	scerr = swift_start(&swift);
-	if (scerr != SCERR_SUCCESS) {
+	memset(&keystone_args, 0, sizeof(keystone_args));
+	keystone_args.url = argv[1];
+	keystone_args.tenant = argv[2];
+	keystone_args.username = argv[3];
+	keystone_args.password = argv[4];
+
+	ret = pthread_attr_init(&keystone_thread_attr);
+	if (ret != 0) {
+		perror("pthread_attr_init");
 		return EXIT_FAILURE;
 	}
 
-	kserr = keystone_start(&keystone);
-	if (kserr != KSERR_SUCCESS) {
-		swift_end(&swift);
+	ret = pthread_create(&keystone_thread, &keystone_thread_attr, (void *(*)(void *)) keystone_thread_func, &keystone_args);
+	if (ret != 0) {
+		perror("pthread_create");
+		return EXIT_FAILURE;
+	}
+
+	ret = pthread_join(keystone_thread, &keystone_retval);
+	if (ret != 0) {
+		perror("pthread_join");
+		return EXIT_FAILURE;
+	}
+
+	scerr = swift_start(&swift);
+	if (scerr != SCERR_SUCCESS) {
 		return EXIT_FAILURE;
 	}
 
 	scerr = swift_set_debug(&swift, 1);
 	if (scerr != SCERR_SUCCESS) {
 		swift_end(&swift);
-		keystone_end(&keystone);
-		return EXIT_FAILURE;
-	}
-
-	kserr = keystone_set_debug(&keystone, 1);
-	if (kserr != KSERR_SUCCESS) {
-		swift_end(&swift);
-		keystone_end(&keystone);
 		return EXIT_FAILURE;
 	}
 
 	scerr = swift_set_proxy(&swift, PROXY);
 	if (scerr != SCERR_SUCCESS) {
 		swift_end(&swift);
-		keystone_end(&keystone);
 		return EXIT_FAILURE;
 	}
 
-	kserr = keystone_set_proxy(&keystone, PROXY);
-	if (kserr != KSERR_SUCCESS) {
-		swift_end(&swift);
-		keystone_end(&keystone);
-		return EXIT_FAILURE;
-	}
-
-	kserr = keystone_authenticate(&keystone, argv[1], argv[2], argv[3], argv[4]);
-	if (kserr != KSERR_SUCCESS) {
-		swift_end(&swift);
-		keystone_end(&keystone);
-		return EXIT_FAILURE;
-	}
-
-	scerr = swift_set_auth_token(&swift, keystone_get_auth_token(&keystone));
+	scerr = swift_set_auth_token(&swift, keystone_args.auth_token);
 	if (scerr != SCERR_SUCCESS) {
 		swift_end(&swift);
-		keystone_end(&keystone);
 		return EXIT_FAILURE;
 	}
 
-	swift_url = keystone_get_service_url(&keystone, OS_SERVICE_SWIFT, 0);
-	fprintf(stderr, "Swift is at: %s\n", swift_url);
+	fprintf(stderr, "Swift is at: %s\n", keystone_args.swift_url);
 
-	scerr = swift_set_url(&swift, swift_url);
+	scerr = swift_set_url(&swift, keystone_args.swift_url);
 	if (scerr != SCERR_SUCCESS) {
 		swift_end(&swift);
-		keystone_end(&keystone);
 		return EXIT_FAILURE;
 	}
 
 	scerr = test_swift_client(&swift);
 	if (scerr != SCERR_SUCCESS) {
 		swift_end(&swift);
-		keystone_end(&keystone);
 		return EXIT_FAILURE;
 	}
 
 	swift_end(&swift);
-	keystone_end(&keystone);
 
 	return EXIT_SUCCESS;
 }
