@@ -66,7 +66,7 @@ keystone_thread_func(void *arg)
 }
 
 struct compare_data_args {
-	const void *data;
+	void *data;
 	size_t len;
 	size_t off;
 };
@@ -87,6 +87,14 @@ compare_data(void *ptr, size_t size, size_t nmemb, void *userdata)
 	return size * nmemb;
 }
 
+static void
+free_test_data(void *arg)
+{
+	struct compare_data_args *args = (struct compare_data_args *) arg;
+
+	free(args->data);
+}
+
 struct swift_thread_args {
 	swift_context_t *swift;
 	const char *swift_url;
@@ -100,7 +108,9 @@ swift_thread_func(void *arg)
 	struct swift_thread_args *args = (struct swift_thread_args *) arg;
 	struct compare_data_args compare_args;
 
-	compare_args.data = "this is the test data";
+	compare_args.data = malloc(1024); /* FIXME: Potential buffer over-run */
+	/* FIXME: pthread_t cannot is an opaque type that can't necessarily be converted to ulong */
+	sprintf(compare_args.data, "This is the test data for thread %ld", (unsigned long) pthread_self());
 	compare_args.len = strlen(compare_args.data);
 	compare_args.off = 0;
 
@@ -109,6 +119,7 @@ swift_thread_func(void *arg)
 		return NULL;
 	}
 	pthread_cleanup_push((void (*)(void *)) swift_end, args->swift);
+	pthread_cleanup_push(free_test_data, &compare_args);
 
 	args->scerr = swift_set_debug(args->swift, 1);
 	if (SCERR_SUCCESS == args->scerr) {
@@ -152,6 +163,7 @@ swift_thread_func(void *arg)
 		args->scerr = swift_delete_container(args->swift);
 	}
 
+	pthread_cleanup_pop(1);
 	pthread_cleanup_pop(1);
 
 	return NULL;
