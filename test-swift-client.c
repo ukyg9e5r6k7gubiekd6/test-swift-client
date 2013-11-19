@@ -22,6 +22,11 @@
 
 #define USAGE "Usage: %s <tenant-name> <username> <password>"
 
+#ifdef min
+#undef min
+#endif
+#define min(a, b) ((a) < (b) ? (a) : (b))
+
 struct keystone_thread_args {
 	keystone_context_t *keystone;
 	const char *url;
@@ -60,6 +65,28 @@ keystone_thread_func(void *arg)
 	return NULL;
 }
 
+struct compare_data_args {
+	const void *data;
+	size_t len;
+	size_t off;
+};
+
+static size_t
+compare_data(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	struct compare_data_args *args = (struct compare_data_args *) userdata;
+
+	assert(size * nmemb <= args->len - args->off);
+
+	if (memcmp(ptr, (((unsigned char *) args->data)) + args->off, min(size * nmemb, args->len - args->off))) {
+		return CURL_READFUNC_ABORT; /* Not the expected data */
+	}
+
+	args->off += size * nmemb;
+
+	return size * nmemb;
+}
+
 struct swift_thread_args {
 	swift_context_t *swift;
 	const char *swift_url;
@@ -71,6 +98,11 @@ static void *
 swift_thread_func(void *arg)
 {
 	struct swift_thread_args *args = (struct swift_thread_args *) arg;
+	struct compare_data_args compare_args;
+
+	compare_args.data = "this is the test data";
+	compare_args.len = strlen(compare_args.data);
+	compare_args.off = 0;
 
 	args->scerr = swift_start(args->swift);
 	if (args->scerr != SCERR_SUCCESS) {
@@ -105,11 +137,11 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_put_file(args->swift, "testdata.txt", 0, NULL, NULL);
+		args->scerr = swift_put_data(args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_get_file(args->swift, "testdata2.txt");
+		args->scerr = swift_get(args->swift, compare_data, &compare_args);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
