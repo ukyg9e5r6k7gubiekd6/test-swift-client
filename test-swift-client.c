@@ -16,9 +16,7 @@
 #else
 #define PROXY NULL
 #endif
-#define SWIFT_ACCOUNT L"testaccount"
-#define SWIFT_CONTAINER L"testcontainer"
-#define SWIFT_OBJECT L"testobject"
+#define NUM_SWIFT_THREADS 2
 
 #define USAGE "Usage: %s <tenant-name> <username> <password>"
 
@@ -27,14 +25,16 @@
 #endif
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
+#define ELEMENTSOF(arr) ((sizeof(arr) / sizeof((arr)[0])))
+
 struct keystone_thread_args {
 	keystone_context_t *keystone;
 	const char *url;
 	const char *tenant;
 	const char *username;
 	const char *password;
-	const char *auth_token;
-	const char *swift_url;
+	char *auth_token;
+	char *swift_url;
 	enum keystone_error kserr;
 };
 
@@ -57,8 +57,8 @@ keystone_thread_func(void *arg)
 		args->kserr = keystone_authenticate(args->keystone, args->url, args->tenant, args->username, args->password);
 	}
 	if (KSERR_SUCCESS == args->kserr) {
-		args->auth_token = keystone_get_auth_token(args->keystone);
-		args->swift_url = keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0);
+		args->auth_token = strdup(keystone_get_auth_token(args->keystone));
+		args->swift_url = strdup(keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0));
 	}
 	pthread_cleanup_pop(1);
 
@@ -66,6 +66,7 @@ keystone_thread_func(void *arg)
 }
 
 struct compare_data_args {
+	swift_context_t *swift;
 	void *data;
 	size_t len;
 	size_t off;
@@ -76,7 +77,9 @@ compare_data(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
 	struct compare_data_args *args = (struct compare_data_args *) userdata;
 
-	assert(size * nmemb <= args->len - args->off);
+	if (size * nmemb > args->len - args->off) {
+		return CURL_READFUNC_ABORT; /* Longer than expected */
+	}
 
 	if (memcmp(ptr, (((unsigned char *) args->data)) + args->off, min(size * nmemb, args->len - args->off))) {
 		return CURL_READFUNC_ABORT; /* Not the expected data */
@@ -95,6 +98,20 @@ free_test_data(void *arg)
 	free(args->data);
 }
 
+static void
+gen_object_name(wchar_t *name, size_t len)
+{
+	/* FIXME: pthread_t is not necessarily convertible to unsigned long */
+	swprintf(name, len, L"Object %ld", (unsigned long) pthread_self());
+}
+
+static void
+gen_container_name(wchar_t *name, size_t len)
+{
+	/* FIXME: pthread_t is not necessarily convertible to unsigned long */
+	swprintf(name, len, L"Container %ld", (unsigned long) pthread_self());
+}
+
 struct swift_thread_args {
 	swift_context_t *swift;
 	const char *swift_url;
@@ -105,14 +122,17 @@ struct swift_thread_args {
 static void *
 swift_thread_func(void *arg)
 {
-	struct swift_thread_args *args = (struct swift_thread_args *) arg;
+	struct swift_thread_args *args;
 	struct compare_data_args compare_args;
+	/* FIXME: Potential buffer over-runs */
+	wchar_t container_name[1024];
+	wchar_t object_name[1024];
 
-	compare_args.data = malloc(1024); /* FIXME: Potential buffer over-run */
-	/* FIXME: pthread_t cannot is an opaque type that can't necessarily be converted to ulong */
-	sprintf(compare_args.data, "This is the test data for thread %ld", (unsigned long) pthread_self());
-	compare_args.len = strlen(compare_args.data);
-	compare_args.off = 0;
+	assert(arg != NULL);
+	args = (struct swift_thread_args *) arg;
+	assert(args->swift != NULL);
+	assert(args->swift_url != NULL);
+	assert(args->auth_token != NULL);
 
 	args->scerr = swift_start(args->swift);
 	if (args->scerr != SCERR_SUCCESS) {
@@ -121,7 +141,24 @@ swift_thread_func(void *arg)
 	pthread_cleanup_push((void (*)(void *)) swift_end, args->swift);
 	pthread_cleanup_push(free_test_data, &compare_args);
 
-	args->scerr = swift_set_debug(args->swift, 1);
+	compare_args.data = args->swift->allocator(NULL, 1024);
+	if (NULL == compare_args.data) {
+		args->scerr = SCERR_ALLOC_FAILED;
+	} else {
+		/* FIXME: pthread_t is an opaque type that is not specified to be castable to ulong */
+		sprintf(compare_args.data, "This is the test data for thread %ld", (unsigned long) pthread_self());
+		compare_args.swift = args->swift;
+		compare_args.len = strlen(compare_args.data);
+		compare_args.off = 0;
+	}
+
+	gen_container_name(container_name, ELEMENTSOF(container_name));
+	gen_object_name(object_name, ELEMENTSOF(object_name));
+
+	if (SCERR_SUCCESS == args->scerr) {
+		args->scerr = swift_set_debug(args->swift, 1);
+	}
+
 	if (SCERR_SUCCESS == args->scerr) {
 		args->scerr = swift_set_proxy(args->swift, PROXY);
 	}
@@ -136,7 +173,7 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_set_container(args->swift, SWIFT_CONTAINER);
+		args->scerr = swift_set_container(args->swift, container_name);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
@@ -144,7 +181,7 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_set_object(args->swift, SWIFT_OBJECT);
+		args->scerr = swift_set_object(args->swift, object_name);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
@@ -179,25 +216,24 @@ main(int argc, char **argv)
 	pthread_attr_t keystone_thread_attr;
 	void *keystone_retval;
 
-	swift_context_t swift;
-	enum swift_error scerr;
-	struct swift_thread_args swift_args;
-	pthread_t swift_thread;
-	pthread_attr_t swift_thread_attr;
-	void *swift_retval;
+	swift_context_t swift_contexts[NUM_SWIFT_THREADS];
+	struct swift_thread_args swift_args[NUM_SWIFT_THREADS];
+	pthread_t swift_thread_ids[NUM_SWIFT_THREADS];
+	pthread_attr_t swift_thread_attrs;
+	void *swift_retvals[NUM_SWIFT_THREADS];
 
 	int ret;
+	unsigned int i;
 
 	if (argc != 5) {
 		fprintf(stderr, USAGE, argv[0]);
 		return EXIT_FAILURE;
 	}
 
-	memset(&swift, 0, sizeof(swift));
+	memset(&swift_contexts, 0, sizeof(swift_contexts));
 	memset(&keystone, 0, sizeof(keystone));
 
-	scerr = swift_global_init();
-	if (scerr != SCERR_SUCCESS) {
+	if (swift_global_init() != SCERR_SUCCESS) {
 		return EXIT_FAILURE;
 	}
 	atexit(swift_global_cleanup);
@@ -247,37 +283,49 @@ main(int argc, char **argv)
 	assert(keystone_args.auth_token);
 
 	memset(&swift_args, 0, sizeof(swift_args));
-	swift_args.swift = &swift;
-	swift_args.swift_url = keystone_args.swift_url;
-	swift_args.auth_token = keystone_args.auth_token;
 
-	ret = pthread_attr_init(&swift_thread_attr);
+	ret = pthread_attr_init(&swift_thread_attrs);
 	if (ret != 0) {
 		perror("pthread_attr_init");
 		return EXIT_FAILURE;
 	}
 
-	ret = pthread_create(&swift_thread, &swift_thread_attr, swift_thread_func, &swift_args);
-	if (ret != 0) {
-		perror("pthread_create");
-		return EXIT_FAILURE;
+	/* Start all of the Swift threads */
+	for (i = 0; i < NUM_SWIFT_THREADS; i++) {
+		swift_args[i].swift = &swift_contexts[i];
+		swift_args[i].swift_url = keystone_args.swift_url;
+		swift_args[i].auth_token = keystone_args.auth_token;
+		ret = pthread_create(&swift_thread_ids[i], &swift_thread_attrs, swift_thread_func, &swift_args[i]);
+		if (ret != 0) {
+			perror("pthread_create");
+			return EXIT_FAILURE;
+		}
 	}
 
-	ret = pthread_join(swift_thread, &swift_retval);
-	if (ret != 0) {
-		perror("pthread_join");
-		return EXIT_FAILURE;
+	/* Wait for each of the Swift threads to complete */
+	for (i = 0; i < NUM_SWIFT_THREADS; i++) {
+		ret = pthread_join(swift_thread_ids[i], &swift_retvals[i]);
+		if (ret != 0) {
+			perror("pthread_join");
+			return EXIT_FAILURE;
+		}
 	}
 
-	ret = pthread_attr_destroy(&swift_thread_attr);
+	ret = pthread_attr_destroy(&swift_thread_attrs);
 	if (ret != 0) {
 		perror("pthread_attr_destroy");
 		return EXIT_FAILURE;
 	}
 
-	if (SCERR_SUCCESS != swift_args.scerr) {
-		return EXIT_FAILURE; /* Swift thread failed */
+	/* Propagate any error from any of the Swift threads */
+	for (i = 0; i < NUM_SWIFT_THREADS; i++) {
+		if (SCERR_SUCCESS != swift_args[i].scerr) {
+			return EXIT_FAILURE; /* Swift thread failed */
+		}
 	}
+
+	free(keystone_args.auth_token);
+	free(keystone_args.swift_url);
 
 	return SCERR_SUCCESS;
 }
