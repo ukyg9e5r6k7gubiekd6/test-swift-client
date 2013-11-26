@@ -16,7 +16,7 @@
 #else
 #define PROXY NULL
 #endif
-#define NUM_SWIFT_THREADS 2
+#define NUM_SWIFT_THREADS 10
 
 #define USAGE "Usage: %s <tenant-name> <username> <password>"
 
