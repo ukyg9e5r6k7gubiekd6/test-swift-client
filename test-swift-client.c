@@ -2,11 +2,12 @@
  * test-swift-client.c
  */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <pthread.h>
-#include <assert.h>
+#include <stdio.h>   /* [sw]printf */
+#include <stdlib.h>  /* perror, malloc, free, strdup */
+#include <string.h>  /* strlen */
+#include <pthread.h> /* pthread_ */
+#include <assert.h>  /* assert */
+#include <time.h>    /* clock_gettime */
 
 #include "keystone-client.h"
 #include "swift-client.h"
@@ -58,7 +59,7 @@ keystone_thread_func(void *arg)
 	}
 	if (KSERR_SUCCESS == args->kserr) {
 		args->auth_token = strdup(keystone_get_auth_token(args->keystone));
-		args->swift_url = strdup(keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0));
+		args->swift_url = strdup(keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0, OS_ENDPOINT_URL_PUBLIC));
 	}
 	pthread_cleanup_pop(1);
 
@@ -117,6 +118,10 @@ struct swift_thread_args {
 	const char *swift_url;
 	const char *auth_token;
 	enum swift_error scerr;
+	pthread_cond_t start_condvar;
+	pthread_mutex_t start_mutex;
+	struct timespec start_time;
+	struct timespec end_time;
 };
 
 static void *
@@ -127,6 +132,7 @@ swift_thread_func(void *arg)
 	/* FIXME: Potential buffer over-runs */
 	wchar_t container_name[1024];
 	wchar_t object_name[1024];
+	int ret;
 
 	assert(arg != NULL);
 	args = (struct swift_thread_args *) arg;
@@ -184,6 +190,31 @@ swift_thread_func(void *arg)
 		args->scerr = swift_set_object(args->swift, object_name);
 	}
 
+	ret = pthread_mutex_lock(&args->start_mutex);
+	if (ret != 0) {
+		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
+	}
+
+	ret = pthread_cond_wait(&args->start_condvar, &args->start_mutex);
+	if (ret != 0) {
+		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread condvar errors */
+	}
+
+	ret = pthread_mutex_unlock(&args->start_mutex);
+	if (ret != 0) {
+		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
+	}
+
+#ifdef CLOCK_MONOTONIC_RAW
+#define CLOCK_TO_USE CLOCK_MONOTONIC_RAW
+#else /* ndef CLOCK_MONOTONIC_RAW */
+#define CLOCK_TO_USE CLOCK_MONOTONIC
+#endif /* ndef CLOCK_MONOTONIC_RAW */
+	ret = clock_gettime(CLOCK_TO_USE, &args->start_time);
+	if (ret != 0) {
+		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+	}
+
 	if (SCERR_SUCCESS == args->scerr) {
 		args->scerr = swift_put_data(args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
 	}
@@ -200,10 +231,21 @@ swift_thread_func(void *arg)
 		args->scerr = swift_delete_container(args->swift);
 	}
 
+	ret = clock_gettime(CLOCK_TO_USE, &args->end_time);
+	if (ret != 0) {
+		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+	}
+
 	pthread_cleanup_pop(1);
 	pthread_cleanup_pop(1);
 
 	return NULL;
+}
+
+static void
+show_swift_times(const struct swift_thread_args *const args, unsigned int n)
+{
+	/* TODO */
 }
 
 int
@@ -220,6 +262,8 @@ main(int argc, char **argv)
 	struct swift_thread_args swift_args[NUM_SWIFT_THREADS];
 	pthread_t swift_thread_ids[NUM_SWIFT_THREADS];
 	pthread_attr_t swift_thread_attrs;
+	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
+	pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
 	void *swift_retvals[NUM_SWIFT_THREADS];
 
 	int ret;
@@ -291,15 +335,36 @@ main(int argc, char **argv)
 	}
 
 	/* Start all of the Swift threads */
-	for (i = 0; i < NUM_SWIFT_THREADS; i++) {
+	for (i = 0; i < ELEMENTSOF(swift_args); i++) {
 		swift_args[i].swift = &swift_contexts[i];
 		swift_args[i].swift_url = keystone_args.swift_url;
 		swift_args[i].auth_token = keystone_args.auth_token;
+		swift_args[i].start_condvar = start_condvar;
+		swift_args[i].start_mutex = start_mutex;
 		ret = pthread_create(&swift_thread_ids[i], &swift_thread_attrs, swift_thread_func, &swift_args[i]);
 		if (ret != 0) {
 			perror("pthread_create");
 			return EXIT_FAILURE;
 		}
+	}
+
+	/* Broadcast the start condvar, telling all Swift threads to start */
+	ret = pthread_mutex_lock(&start_mutex);
+	if (ret != 0) {
+		perror("pthread_mutex_lock");
+		return EXIT_FAILURE;
+	}
+
+	ret = pthread_cond_broadcast(&start_condvar);
+	if (ret != 0) {
+		perror("pthread_cond_broadcast");
+		return EXIT_FAILURE;
+	}
+
+	ret = pthread_mutex_unlock(&start_mutex);
+	if (ret != 0) {
+		perror("pthread_mutex_unlock");
+		return EXIT_FAILURE;
 	}
 
 	/* Wait for each of the Swift threads to complete */
@@ -311,11 +376,28 @@ main(int argc, char **argv)
 		}
 	}
 
+	ret = pthread_cond_destroy(&start_condvar);
+	if (ret != 0) {
+		perror("pthread_cond_destroy");
+		return EXIT_FAILURE;
+	}
+
+	ret = pthread_mutex_destroy(&start_mutex);
+	if (ret != 0) {
+		perror("pthread_mutex_destroy");
+		return EXIT_FAILURE;
+	}
+
 	ret = pthread_attr_destroy(&swift_thread_attrs);
 	if (ret != 0) {
 		perror("pthread_attr_destroy");
 		return EXIT_FAILURE;
 	}
+
+	free(keystone_args.auth_token);
+	free(keystone_args.swift_url);
+
+	show_swift_times(swift_args, ELEMENTSOF(swift_args));
 
 	/* Propagate any error from any of the Swift threads */
 	for (i = 0; i < NUM_SWIFT_THREADS; i++) {
@@ -323,9 +405,6 @@ main(int argc, char **argv)
 			return EXIT_FAILURE; /* Swift thread failed */
 		}
 	}
-
-	free(keystone_args.auth_token);
-	free(keystone_args.swift_url);
 
 	return SCERR_SUCCESS;
 }
