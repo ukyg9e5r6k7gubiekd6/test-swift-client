@@ -12,6 +12,8 @@
 #include "keystone-client.h"
 #include "swift-client.h"
 
+#define USAGE "Usage: %s <keystone-URL> <tenant-name> <username> <password>"
+
 #if 0
 #define PROXY "socks5://127.0.0.1:8080/"
 #else
@@ -19,7 +21,7 @@
 #endif
 #define NUM_SWIFT_THREADS 10
 
-#define USAGE "Usage: %s <tenant-name> <username> <password>"
+/* #define DEBUG_CURL */
 
 #ifdef min
 #undef min
@@ -48,6 +50,12 @@ struct keystone_thread_args {
 	enum keystone_error kserr;
 };
 
+static void
+local_keystone_end(void *arg)
+{
+	keystone_end((keystone_context_t *) arg);
+}
+
 /**
  * Executed by each Keystone thread.
  */
@@ -60,19 +68,40 @@ keystone_thread_func(void *arg)
 	if (KSERR_SUCCESS != args->kserr) {
 		return NULL;
 	}
-	pthread_cleanup_push((void (*)(void *)) keystone_end, args->keystone);
+	pthread_cleanup_push(local_keystone_end, args->keystone);
 
-	args->kserr = keystone_set_debug(args->keystone, 1);
+#ifdef DEBUG_CURL
+	if (KSERR_SUCCESS == args->kserr) {
+		args->kserr = keystone_set_debug(args->keystone, 1);
+	}
+#endif /* DEBUG_CURL */
+
 	if (KSERR_SUCCESS == args->kserr) {
 		args->kserr = keystone_set_proxy(args->keystone, PROXY);
 	}
+
 	if (KSERR_SUCCESS == args->kserr) {
 		args->kserr = keystone_authenticate(args->keystone, args->url, args->tenant, args->username, args->password);
 	}
+
 	if (KSERR_SUCCESS == args->kserr) {
-		args->auth_token = strdup(keystone_get_auth_token(args->keystone));
-		args->swift_url = strdup(keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0, OS_ENDPOINT_URL_PUBLIC));
+		const char *auth_token = keystone_get_auth_token(args->keystone);
+		if (auth_token) {
+			args->auth_token = strdup(auth_token);
+		} else {
+			args->kserr = KSERR_AUTH_REJECTED;
+		}
 	}
+
+	if (KSERR_SUCCESS == args->kserr) {
+		const char *swift_url = keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0, OS_ENDPOINT_URL_PUBLIC);
+		if (swift_url) {
+			args->swift_url = strdup(swift_url);
+		} else {
+			args->kserr = KSERR_INIT_FAILED; /* Not the right error code, but Keystone should not know about failure to find Swift */
+		}
+	}
+
 	pthread_cleanup_pop(1);
 
 	return NULL;
@@ -119,20 +148,18 @@ free_test_data(void *arg)
  * Generate a Swift object name unique to this thread.
  */
 static void
-gen_object_name(wchar_t *name, size_t len)
+gen_object_name(unsigned int thread_num, wchar_t *name, size_t len)
 {
-	/* FIXME: pthread_t is not necessarily convertible to unsigned long */
-	swprintf(name, len, L"Object %lu", (unsigned long) pthread_self());
+	swprintf(name, len, L"Object %u", thread_num);
 }
 
 /**
  * Generate a Swift conainer name unique to this thread.
  */
 static void
-gen_container_name(wchar_t *name, size_t len)
+gen_container_name(unsigned int thread_num, wchar_t *name, size_t len)
 {
-	/* FIXME: pthread_t is not necessarily convertible to unsigned long */
-	swprintf(name, len, L"Container %lu", (unsigned long) pthread_self());
+	swprintf(name, len, L"Container %u", thread_num);
 }
 
 /**
@@ -140,6 +167,7 @@ gen_container_name(wchar_t *name, size_t len)
  */
 struct swift_thread_args {
 	swift_context_t *swift;
+	unsigned int thread_num;
 	const char *swift_url;
 	const char *auth_token;
 	enum swift_error scerr;
@@ -148,6 +176,12 @@ struct swift_thread_args {
 	struct timespec start_time;
 	struct timespec end_time;
 };
+
+static void
+local_swift_end(void *arg)
+{
+	swift_end((swift_context_t *) arg);
+}
 
 /**
  * Executed by each Swift thread.
@@ -172,26 +206,27 @@ swift_thread_func(void *arg)
 	if (args->scerr != SCERR_SUCCESS) {
 		return NULL;
 	}
-	pthread_cleanup_push((void (*)(void *)) swift_end, args->swift);
+	pthread_cleanup_push(local_swift_end, args->swift);
 	pthread_cleanup_push(free_test_data, &compare_args);
 
 	compare_args.data = args->swift->allocator(NULL, 1024);
 	if (NULL == compare_args.data) {
 		args->scerr = SCERR_ALLOC_FAILED;
 	} else {
-		/* FIXME: pthread_t is an opaque type that is not specified to be castable to ulong */
-		sprintf(compare_args.data, "This is the test data for thread %lu", (unsigned long) pthread_self());
+		sprintf(compare_args.data, "This is the test data for thread %u", args->thread_num);
 		compare_args.swift = args->swift;
 		compare_args.len = strlen(compare_args.data);
 		compare_args.off = 0;
 	}
 
-	gen_container_name(container_name, ELEMENTSOF(container_name));
-	gen_object_name(object_name, ELEMENTSOF(object_name));
+	gen_container_name(args->thread_num, container_name, ELEMENTSOF(container_name));
+	gen_object_name(args->thread_num, object_name, ELEMENTSOF(object_name));
 
+#ifdef DEBUG_CURL
 	if (SCERR_SUCCESS == args->scerr) {
 		args->scerr = swift_set_debug(args->swift, 1);
 	}
+#endif /* DEBUG_CURL */
 
 	if (SCERR_SUCCESS == args->scerr) {
 		args->scerr = swift_set_proxy(args->swift, PROXY);
@@ -277,7 +312,7 @@ show_swift_times(const struct swift_thread_args *args, unsigned int n)
 	while (n--) {
 		double start = args->start_time.tv_sec * 1000000 + args->start_time.tv_nsec / 1000;
 		double end = args->end_time.tv_sec * 1000000 + args->end_time.tv_nsec / 1000;
-		fprintf(stderr, "Thread %3u: duration (microseconds): %8.4f\n", n, end - start);
+		fprintf(stderr, "Thread %3u: duration (microseconds): %8.4f\n", args->thread_num, end - start);
 		args--;
 	}
 }
@@ -351,6 +386,7 @@ main(int argc, char **argv)
 	/* Start all of the Swift threads */
 	for (i = 0; i < ELEMENTSOF(swift_args); i++) {
 		swift_args[i].swift = &swift_contexts[i];
+		swift_args[i].thread_num = i;
 		swift_args[i].swift_url = keystone_args.swift_url;
 		swift_args[i].auth_token = keystone_args.auth_token;
 		swift_args[i].start_condvar = start_condvar;
