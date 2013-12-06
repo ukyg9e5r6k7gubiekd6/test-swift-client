@@ -28,6 +28,15 @@
 
 #define ELEMENTSOF(arr) ((sizeof(arr) / sizeof((arr)[0])))
 
+#ifdef CLOCK_MONOTONIC_RAW
+/* Use NTP-immune but Linux-specific clock */
+#define CLOCK_TO_USE CLOCK_MONOTONIC_RAW
+#else /* ndef CLOCK_MONOTONIC_RAW */
+/* Use POSIX-defined but NTP-vulnerable clock */
+#define CLOCK_TO_USE CLOCK_MONOTONIC
+#endif /* ndef CLOCK_MONOTONIC_RAW */
+
+/* In/out parameters to a Keystone thread */
 struct keystone_thread_args {
 	keystone_context_t *keystone;
 	const char *url;
@@ -39,6 +48,9 @@ struct keystone_thread_args {
 	enum keystone_error kserr;
 };
 
+/**
+ * Executed by each Keystone thread.
+ */
 static void *
 keystone_thread_func(void *arg)
 {
@@ -66,6 +78,7 @@ keystone_thread_func(void *arg)
 	return NULL;
 }
 
+/* In/out arguments to a compare_data callback */
 struct compare_data_args {
 	swift_context_t *swift;
 	void *data;
@@ -73,6 +86,9 @@ struct compare_data_args {
 	size_t off;
 };
 
+/**
+ * Compare the given data to that expected.
+ */
 static size_t
 compare_data(void *ptr, size_t size, size_t nmemb, void *userdata)
 {
@@ -99,20 +115,29 @@ free_test_data(void *arg)
 	free(args->data);
 }
 
+/**
+ * Generate a Swift object name unique to this thread.
+ */
 static void
 gen_object_name(wchar_t *name, size_t len)
 {
 	/* FIXME: pthread_t is not necessarily convertible to unsigned long */
-	swprintf(name, len, L"Object %ld", (unsigned long) pthread_self());
+	swprintf(name, len, L"Object %lu", (unsigned long) pthread_self());
 }
 
+/**
+ * Generate a Swift conainer name unique to this thread.
+ */
 static void
 gen_container_name(wchar_t *name, size_t len)
 {
 	/* FIXME: pthread_t is not necessarily convertible to unsigned long */
-	swprintf(name, len, L"Container %ld", (unsigned long) pthread_self());
+	swprintf(name, len, L"Container %lu", (unsigned long) pthread_self());
 }
 
+/**
+ * In/out parameters to a Swift thread.
+ */
 struct swift_thread_args {
 	swift_context_t *swift;
 	const char *swift_url;
@@ -124,6 +149,9 @@ struct swift_thread_args {
 	struct timespec end_time;
 };
 
+/**
+ * Executed by each Swift thread.
+ */
 static void *
 swift_thread_func(void *arg)
 {
@@ -152,7 +180,7 @@ swift_thread_func(void *arg)
 		args->scerr = SCERR_ALLOC_FAILED;
 	} else {
 		/* FIXME: pthread_t is an opaque type that is not specified to be castable to ulong */
-		sprintf(compare_args.data, "This is the test data for thread %ld", (unsigned long) pthread_self());
+		sprintf(compare_args.data, "This is the test data for thread %lu", (unsigned long) pthread_self());
 		compare_args.swift = args->swift;
 		compare_args.len = strlen(compare_args.data);
 		compare_args.off = 0;
@@ -205,11 +233,7 @@ swift_thread_func(void *arg)
 		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
 	}
 
-#ifdef CLOCK_MONOTONIC_RAW
-#define CLOCK_TO_USE CLOCK_MONOTONIC_RAW
-#else /* ndef CLOCK_MONOTONIC_RAW */
-#define CLOCK_TO_USE CLOCK_MONOTONIC
-#endif /* ndef CLOCK_MONOTONIC_RAW */
+	/* Save start time */
 	ret = clock_gettime(CLOCK_TO_USE, &args->start_time);
 	if (ret != 0) {
 		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
@@ -231,6 +255,7 @@ swift_thread_func(void *arg)
 		args->scerr = swift_delete_container(args->swift);
 	}
 
+	/* Save end time */
 	ret = clock_gettime(CLOCK_TO_USE, &args->end_time);
 	if (ret != 0) {
 		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
@@ -242,10 +267,19 @@ swift_thread_func(void *arg)
 	return NULL;
 }
 
+/**
+ * Display the execution time of each of the Swift threads in microseconds.
+ */
 static void
-show_swift_times(const struct swift_thread_args *const args, unsigned int n)
+show_swift_times(const struct swift_thread_args *args, unsigned int n)
 {
-	/* TODO */
+	fprintf(stderr, "Swift execution times for %u threads:\n", n);
+	while (n--) {
+		double start = args->start_time.tv_sec * 1000000 + args->start_time.tv_nsec / 1000;
+		double end = args->end_time.tv_sec * 1000000 + args->end_time.tv_nsec / 1000;
+		fprintf(stderr, "Thread %3u: duration (microseconds): %8.4f\n", n, end - start);
+		args--;
+	}
 }
 
 int
@@ -255,13 +289,11 @@ main(int argc, char **argv)
 	enum keystone_error kserr;
 	struct keystone_thread_args keystone_args;
 	pthread_t keystone_thread;
-	pthread_attr_t keystone_thread_attr;
 	void *keystone_retval;
 
 	swift_context_t swift_contexts[NUM_SWIFT_THREADS];
 	struct swift_thread_args swift_args[NUM_SWIFT_THREADS];
 	pthread_t swift_thread_ids[NUM_SWIFT_THREADS];
-	pthread_attr_t swift_thread_attrs;
 	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
 	pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
 	void *swift_retvals[NUM_SWIFT_THREADS];
@@ -295,13 +327,7 @@ main(int argc, char **argv)
 	keystone_args.username = argv[3];
 	keystone_args.password = argv[4];
 
-	ret = pthread_attr_init(&keystone_thread_attr);
-	if (ret != 0) {
-		perror("pthread_attr_init");
-		return EXIT_FAILURE;
-	}
-
-	ret = pthread_create(&keystone_thread, &keystone_thread_attr, keystone_thread_func, &keystone_args);
+	ret = pthread_create(&keystone_thread, NULL, keystone_thread_func, &keystone_args);
 	if (ret != 0) {
 		perror("pthread_create");
 		return EXIT_FAILURE;
@@ -310,12 +336,6 @@ main(int argc, char **argv)
 	ret = pthread_join(keystone_thread, &keystone_retval);
 	if (ret != 0) {
 		perror("pthread_join");
-		return EXIT_FAILURE;
-	}
-
-	ret = pthread_attr_destroy(&keystone_thread_attr);
-	if (ret != 0) {
-		perror("pthread_attr_destroy");
 		return EXIT_FAILURE;
 	}
 
@@ -328,12 +348,6 @@ main(int argc, char **argv)
 
 	memset(&swift_args, 0, sizeof(swift_args));
 
-	ret = pthread_attr_init(&swift_thread_attrs);
-	if (ret != 0) {
-		perror("pthread_attr_init");
-		return EXIT_FAILURE;
-	}
-
 	/* Start all of the Swift threads */
 	for (i = 0; i < ELEMENTSOF(swift_args); i++) {
 		swift_args[i].swift = &swift_contexts[i];
@@ -341,7 +355,7 @@ main(int argc, char **argv)
 		swift_args[i].auth_token = keystone_args.auth_token;
 		swift_args[i].start_condvar = start_condvar;
 		swift_args[i].start_mutex = start_mutex;
-		ret = pthread_create(&swift_thread_ids[i], &swift_thread_attrs, swift_thread_func, &swift_args[i]);
+		ret = pthread_create(&swift_thread_ids[i], NULL, swift_thread_func, &swift_args[i]);
 		if (ret != 0) {
 			perror("pthread_create");
 			return EXIT_FAILURE;
@@ -385,12 +399,6 @@ main(int argc, char **argv)
 	ret = pthread_mutex_destroy(&start_mutex);
 	if (ret != 0) {
 		perror("pthread_mutex_destroy");
-		return EXIT_FAILURE;
-	}
-
-	ret = pthread_attr_destroy(&swift_thread_attrs);
-	if (ret != 0) {
-		perror("pthread_attr_destroy");
 		return EXIT_FAILURE;
 	}
 
