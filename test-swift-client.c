@@ -330,7 +330,7 @@ main(int argc, char **argv)
 
 	swift_context_t *swift_contexts = NULL;
 	struct swift_thread_args *swift_args = NULL;
-	pthread_t *swift_thread_ids = 0;
+	pthread_t *swift_thread_ids = NULL;
 	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
 	pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
 	void **swift_retvals = NULL;
