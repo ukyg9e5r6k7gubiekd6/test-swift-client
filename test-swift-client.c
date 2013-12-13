@@ -12,14 +12,14 @@
 #include "keystone-client.h"
 #include "swift-client.h"
 
-#define USAGE "Usage: %s <keystone-URL> <tenant-name> <username> <password>"
+#define USAGE "Usage: %s <keystone-URL> <tenant-name> <username> <password> [ <num-threads> = 1 ]"
 
 #if 0
 #define PROXY "socks5://127.0.0.1:8080/"
 #else
 #define PROXY NULL
 #endif
-#define NUM_SWIFT_THREADS 10
+#define NUM_SWIFT_THREADS_DEFAULT 1
 
 /* #define DEBUG_CURL */
 
@@ -29,6 +29,7 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
 #define ELEMENTSOF(arr) ((sizeof(arr) / sizeof((arr)[0])))
+/* FIXME: #define typealloc(type, count) (( ##type *) malloc(sizeof( ##type))) */
 
 #ifdef CLOCK_MONOTONIC_RAW
 /* Use NTP-immune but Linux-specific clock */
@@ -320,29 +321,56 @@ show_swift_times(const struct swift_thread_args *args, unsigned int n)
 int
 main(int argc, char **argv)
 {
-	keystone_context_t keystone;
+	keystone_context_t keystone_context;
 	enum keystone_error kserr;
 	struct keystone_thread_args keystone_args;
 	pthread_t keystone_thread;
 	void *keystone_retval;
+	unsigned int num_swift_threads;
 
-	swift_context_t swift_contexts[NUM_SWIFT_THREADS];
-	struct swift_thread_args swift_args[NUM_SWIFT_THREADS];
-	pthread_t swift_thread_ids[NUM_SWIFT_THREADS];
+	swift_context_t *swift_contexts = NULL;
+	struct swift_thread_args *swift_args = NULL;
+	pthread_t *swift_thread_ids = 0;
 	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
 	pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
-	void *swift_retvals[NUM_SWIFT_THREADS];
+	void **swift_retvals = NULL;
 
 	int ret;
 	unsigned int i;
 
-	if (argc != 5) {
+	if (5 == argc) {
+		num_swift_threads = NUM_SWIFT_THREADS_DEFAULT;
+	} else if (6 == argc) {
+		num_swift_threads = atoi(argv[5]);
+		if (0 == num_swift_threads) {
+			fputs("Swift thread count must be non-zero\n", stderr);
+			fprintf(stderr, USAGE, argv[0]);
+			return EXIT_FAILURE;
+		}
+	} else {
 		fprintf(stderr, USAGE, argv[0]);
 		return EXIT_FAILURE;
 	}
 
-	memset(&swift_contexts, 0, sizeof(swift_contexts));
-	memset(&keystone, 0, sizeof(keystone));
+	swift_contexts = (swift_context_t *) malloc(num_swift_threads * sizeof(swift_context_t));
+	if (NULL == swift_contexts) {
+		return EXIT_FAILURE;
+	}
+	swift_args = (struct swift_thread_args *) malloc(num_swift_threads * sizeof(struct swift_thread_args));
+	if (NULL == swift_args) {
+		return EXIT_FAILURE;
+	}
+	swift_thread_ids = (pthread_t *) malloc(num_swift_threads * sizeof(pthread_t));
+	if (NULL == swift_thread_ids) {
+		return EXIT_FAILURE;
+	}
+	swift_retvals = (void **) malloc(num_swift_threads * sizeof(void *));
+	if (NULL == swift_retvals) {
+		return EXIT_FAILURE;
+	}
+
+	memset(&swift_contexts, 0, num_swift_threads * sizeof(swift_context_t));
+	memset(&keystone_context, 0, sizeof(keystone_context));
 
 	if (swift_global_init() != SCERR_SUCCESS) {
 		return EXIT_FAILURE;
@@ -356,7 +384,7 @@ main(int argc, char **argv)
 	atexit(keystone_global_cleanup);
 
 	memset(&keystone_args, 0, sizeof(keystone_args));
-	keystone_args.keystone = &keystone;
+	keystone_args.keystone = &keystone_context;
 	keystone_args.url = argv[1];
 	keystone_args.tenant = argv[2];
 	keystone_args.username = argv[3];
@@ -418,7 +446,7 @@ main(int argc, char **argv)
 	}
 
 	/* Wait for each of the Swift threads to complete */
-	for (i = 0; i < NUM_SWIFT_THREADS; i++) {
+	for (i = 0; i < NUM_SWIFT_THREADS_DEFAULT; i++) {
 		ret = pthread_join(swift_thread_ids[i], &swift_retvals[i]);
 		if (ret != 0) {
 			perror("pthread_join");
@@ -440,11 +468,15 @@ main(int argc, char **argv)
 
 	free(keystone_args.auth_token);
 	free(keystone_args.swift_url);
+	free(swift_contexts);
+	free(swift_args);
+	free(swift_thread_ids);
+	free(swift_retvals);
 
 	show_swift_times(swift_args, ELEMENTSOF(swift_args));
 
 	/* Propagate any error from any of the Swift threads */
-	for (i = 0; i < NUM_SWIFT_THREADS; i++) {
+	for (i = 0; i < NUM_SWIFT_THREADS_DEFAULT; i++) {
 		if (SCERR_SUCCESS != swift_args[i].scerr) {
 			return EXIT_FAILURE; /* Swift thread failed */
 		}
