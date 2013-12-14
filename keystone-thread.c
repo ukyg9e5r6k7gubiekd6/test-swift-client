@@ -24,11 +24,11 @@ keystone_thread_func(void *arg)
 	}
 	pthread_cleanup_push(local_keystone_end, args->keystone);
 
-#ifdef DEBUG_CURL
 	if (KSERR_SUCCESS == args->kserr) {
-		args->kserr = keystone_set_debug(args->keystone, 1);
+		if (args->debug) {
+			args->kserr = keystone_set_debug(args->keystone, 1);
+		}
 	}
-#endif /* DEBUG_CURL */
 
 	if (KSERR_SUCCESS == args->kserr) {
 		args->kserr = keystone_set_proxy(args->keystone, args->proxy);
