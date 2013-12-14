@@ -327,7 +327,7 @@ show_swift_times(const struct swift_thread_args *args, unsigned int n)
 		double start = args->start_time.tv_sec * 1000000 + args->start_time.tv_nsec / 1000;
 		double end   = args->end_time.tv_sec   * 1000000 + args->end_time.tv_nsec   / 1000;
 		fprintf(stderr, "Thread %3u: duration (microseconds): %8.4f\n", args->thread_num, end - start);
-		args--;
+		args++;
 	}
 }
 
