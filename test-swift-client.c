@@ -20,6 +20,9 @@
 #define PROXY NULL
 #endif
 #define NUM_SWIFT_THREADS_DEFAULT 1
+#define OBJECT_SIZE 1024
+#define OBJECT_DATA SIMPLE_TEXT
+#define RANDOM_FILE "/dev/urandom"
 
 /* #define DEBUG_CURL */
 
@@ -129,13 +132,95 @@ compare_data(void *ptr, size_t size, size_t nmemb, void *userdata)
 		return CURL_READFUNC_ABORT; /* Longer than expected */
 	}
 
-	if (memcmp(ptr, (((unsigned char *) args->data)) + args->off, min(size * nmemb, args->len - args->off))) {
-		return CURL_READFUNC_ABORT; /* Not the expected data */
+	if (NULL == args->data) {
+		/* Require received data to be all-zero bytes */
+		const char *p;
+		for (p = ptr; p < (char *) ptr + (size * nmemb); p++) {
+			if (*p) {
+				return CURL_READFUNC_ABORT; /* Not the expected data */
+			}
+		}
+	} else {
+		/* Require received data to be identical to expected data */
+		if (memcmp(ptr, (((unsigned char *) args->data)) + args->off, min(size * nmemb, args->len - args->off))) {
+			return CURL_READFUNC_ABORT; /* Not the expected data */
+		}
 	}
 
 	args->off += size * nmemb;
 
 	return size * nmemb;
+}
+
+/* Types of test data with which to pupulate the Swift object */
+enum test_data_type {
+	SIMPLE_TEXT,  /* Simple text, easily identifiable in the Swift object's data */
+	ALL_ZEROS,    /* Null bytes */
+	PSEUDO_RANDOM /* Pseudo-random bits */
+};
+
+/**
+ * Fill the given test data with repetitions of an easily-identifiable text.
+ */
+static void
+gen_test_data_simple_text(unsigned int thread_num, char *data, size_t len)
+{
+	const char *chunk_fmt = "This is the test data for thread %u ";
+	size_t chunk_len = snprintf(NULL, 0, chunk_fmt, thread_num);
+	char *p;
+
+	for (p = data; len > chunk_len; p += chunk_len, len -= chunk_len) {
+		sprintf(p, chunk_fmt, thread_num);
+	}
+}
+
+/**
+ * Fill the given test data with pseudo-random bits.
+ */
+static void
+gen_test_data_urandom(char *data, size_t len)
+{
+	int ret;
+	size_t size;
+	FILE *urandom;
+
+	urandom = fopen(RANDOM_FILE, "r");
+	if (NULL == urandom) {
+		perror("fopen " RANDOM_FILE);
+		exit(EXIT_FAILURE);
+	}
+	size = fread(data, 1, len, urandom);
+	if (size != len) {
+		perror("fread " RANDOM_FILE);
+		exit(EXIT_FAILURE);
+	}
+	ret = fclose(urandom);
+	if (ret != 0) {
+		perror("fclose " RANDOM_FILE);
+		exit(EXIT_FAILURE);
+	}
+}
+
+/**
+ * Fill the given test data with the given type of data.
+ */
+static void
+gen_test_data(unsigned int thread_num, enum test_data_type data_type, char *data, size_t len)
+{
+	switch(data_type) {
+	case SIMPLE_TEXT:
+		gen_test_data_simple_text(thread_num, data, len);
+		break;
+	case ALL_ZEROS:
+		/* Nothing to do */
+		break;
+	case PSEUDO_RANDOM:
+		gen_test_data_urandom(data, len);
+		break;
+	default:
+		assert(0);
+		break;
+	}
 }
 
 static void
@@ -177,6 +262,8 @@ struct swift_thread_args {
 	enum swift_error scerr;
 	pthread_cond_t start_condvar;
 	pthread_mutex_t start_mutex;
+	enum test_data_type data_type;
+	size_t data_size;
 	struct timespec start_time;
 	struct timespec start_put_time;
 	struct timespec end_put_time;
@@ -224,14 +311,19 @@ swift_thread_func(void *arg)
 		}
 	}
 
-	compare_args.data = args->swift->allocator(NULL, 1024);
-	if (NULL == compare_args.data) {
-		args->scerr = SCERR_ALLOC_FAILED;
+	compare_args.swift = args->swift;
+	compare_args.off = 0;
+	compare_args.len = args->data_size;
+	if (ALL_ZEROS == args->data_type) {
+		/* Special case: there is no need ever to actually store a large number of zero bits */
+		compare_args.data = NULL;
 	} else {
-		sprintf(compare_args.data, "This is the test data for thread %u", args->thread_num);
-		compare_args.swift = args->swift;
-		compare_args.len = strlen(compare_args.data);
-		compare_args.off = 0;
+		compare_args.data = args->swift->allocator(NULL, args->data_size);
+		if (NULL == compare_args.data) {
+			args->scerr = SCERR_ALLOC_FAILED;
+		} else {
+			gen_test_data(args->thread_num, args->data_type, compare_args.data, compare_args.len);
+		}
 	}
 	pthread_cleanup_push(free_test_data, &compare_args);
 
@@ -471,6 +563,8 @@ main(int argc, char **argv)
 	for (i = 0; i < num_swift_threads; i++) {
 		swift_args[i].swift = &swift_contexts[i];
 		swift_args[i].thread_num = i;
+		swift_args[i].data_type = OBJECT_DATA;
+		swift_args[i].data_size = OBJECT_SIZE;
 		swift_args[i].swift_url = keystone_args.swift_url;
 		swift_args[i].auth_token = keystone_args.auth_token;
 		swift_args[i].start_condvar = start_condvar;
