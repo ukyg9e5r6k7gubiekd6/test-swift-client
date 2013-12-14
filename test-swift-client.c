@@ -21,6 +21,9 @@
 #endif
 /* Default number of Swift threads, if not over-ridden on command line */
 #define NUM_SWIFT_THREADS_DEFAULT 1
+/* Number of times each thread performs its identical put and its identical get */
+/* TODO: Make this a default, and accept a command-line argument to over-ride it */
+#define NUM_SWIFT_ITERATIONS 1
 /* Size of Swift objects */
 /* TODO: Make this a default, and accept a command-line argument to over-ride it */
 #define OBJECT_SIZE 1024
@@ -282,6 +285,7 @@ struct swift_thread_args {
 	pthread_mutex_t start_mutex;
 	enum test_data_type data_type;
 	size_t data_size;
+	unsigned int num_iterations;
 	unsigned int verify_data;
 	struct timespec start_time;
 	struct timespec start_put_time;
@@ -402,7 +406,7 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		/* Save time at start of put operation */
+		/* Save time at start of put operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->start_put_time);
 		if (ret != 0) {
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
@@ -410,11 +414,17 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_put_data(args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
+		unsigned int i;
+		for (i = 0; i < args->num_iterations; i++) {
+			args->scerr = swift_put_data(args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
+			if (args->scerr != SCERR_SUCCESS) {
+				break;
+			}
+		}
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		/* Save time at end of put operation */
+		/* Save time at end of put operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->end_put_time);
 		if (ret != 0) {
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
@@ -422,7 +432,7 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		/* Save time at start of get operation */
+		/* Save time at start of get operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->start_get_time);
 		if (ret != 0) {
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
@@ -430,15 +440,21 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		if (args->verify_data) {
-			args->scerr = swift_get(args->swift, compare_data, &compare_args);
-		} else {
-			args->scerr = swift_get(args->swift, ignore_data, NULL);
+		unsigned int i;
+		for (i = 0; i < args->num_iterations; i++) {
+			if (args->verify_data) {
+				args->scerr = swift_get(args->swift, compare_data, &compare_args);
+			} else {
+				args->scerr = swift_get(args->swift, ignore_data, NULL);
+			}
+			if (args->scerr != SCERR_SUCCESS) {
+				break;
+			}
 		}
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		/* Save time at end of get operation */
+		/* Save time at end of get operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->end_get_time);
 		if (ret != 0) {
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
@@ -590,6 +606,7 @@ main(int argc, char **argv)
 		swift_args[i].data_type = OBJECT_DATA;
 		swift_args[i].data_size = OBJECT_SIZE;
 		swift_args[i].verify_data = VERIFY_RETRIEVED_DATA;
+		swift_args[i].num_iterations = NUM_SWIFT_ITERATIONS;
 		swift_args[i].swift_url = keystone_args.swift_url;
 		swift_args[i].auth_token = keystone_args.auth_token;
 		swift_args[i].start_condvar = start_condvar;
