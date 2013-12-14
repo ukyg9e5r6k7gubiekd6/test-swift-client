@@ -220,6 +220,7 @@ gen_container_name(unsigned int thread_num, wchar_t *name, size_t len)
 struct swift_thread_args {
 	swift_context_t *swift;         /* Swift library context */
 	unsigned int thread_num;        /* Swift thread index */
+	const char *proxy;              /* Proxy to use, or NULL for none */
 	const char *swift_url;          /* Public endpoint URL of Swift service */
 	const char *auth_token;         /* Authentication token from Keystone */
 	enum swift_error scerr;         /* Swift client error encountered */
@@ -302,7 +303,7 @@ swift_thread_func(void *arg)
 #endif /* DEBUG_CURL */
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_set_proxy(args->swift, PROXY);
+		args->scerr = swift_set_proxy(args->swift, args->proxy);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
@@ -550,6 +551,7 @@ main(int argc, char **argv)
 	/* Start all of the Swift threads */
 	for (i = 0; i < num_swift_threads; i++) {
 		swift_args[i].swift = &swift_contexts[i];
+		swift_args[i].proxy = PROXY;
 		swift_args[i].thread_num = i;
 		swift_args[i].data_type = OBJECT_DATA;
 		swift_args[i].data_size = OBJECT_SIZE;
