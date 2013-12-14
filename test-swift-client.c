@@ -184,7 +184,7 @@ make_zero_data(void *ptr, size_t size, size_t nmemb, void *userdata)
 	return size;
 }
 
-/* Types of test data with which to pupulate the Swift object */
+/* Types of test data with which to populate a Swift object */
 enum test_data_type {
 	SIMPLE_TEXT,  /* Simple text, easily identifiable in the Swift object's data */
 	ALL_ZEROS,    /* Null bytes */
@@ -275,7 +275,7 @@ gen_object_name(unsigned int thread_num, wchar_t *name, size_t len)
 }
 
 /**
- * Generate a Swift conainer name unique to this thread.
+ * Generate a Swift container name unique to this thread.
  */
 static void
 gen_container_name(unsigned int thread_num, wchar_t *name, size_t len)
@@ -287,23 +287,23 @@ gen_container_name(unsigned int thread_num, wchar_t *name, size_t len)
  * In/out parameters to a Swift thread.
  */
 struct swift_thread_args {
-	swift_context_t *swift;
-	unsigned int thread_num;
-	const char *swift_url;
-	const char *auth_token;
-	enum swift_error scerr;
-	pthread_cond_t start_condvar;
-	pthread_mutex_t start_mutex;
-	enum test_data_type data_type;
-	size_t data_size;
-	unsigned int num_iterations;
-	unsigned int verify_data;
-	struct timespec start_time;
-	struct timespec start_put_time;
-	struct timespec end_put_time;
-	struct timespec start_get_time;
-	struct timespec end_get_time;
-	struct timespec end_time;
+	swift_context_t *swift;         /* Swift library context */
+	unsigned int thread_num;        /* Swift thread index */
+	const char *swift_url;          /* Public endpoint URL of Swift service */
+	const char *auth_token;         /* Authentication token from Keystone */
+	enum swift_error scerr;         /* Swift client error encountered */
+	pthread_cond_t start_condvar;   /* Wait for this condition before starting */
+	pthread_mutex_t start_mutex;    /* Protects access to start condvar */
+	enum test_data_type data_type;  /* Type of test data with which to fill Swift objects */
+	size_t data_size;               /* Length of each Swift object */
+	unsigned int num_iterations;    /* Number of sequential identical get and number of put operations */
+	unsigned int verify_data;       /* Whether to verify that retrieved data is that which was previously inserted */
+	struct timespec start_time;     /* Time of start of Swift thread */
+	struct timespec start_put_time; /* Time of start of all put operations */
+	struct timespec end_put_time;   /* Time of end of all put operations */
+	struct timespec start_get_time; /* Time of start of all get operations */
+	struct timespec end_get_time;   /* Time of end of all get operations */
+	struct timespec end_time;       /* Time of end of Swift thread */
 };
 
 static void
