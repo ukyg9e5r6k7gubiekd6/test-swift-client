@@ -19,9 +19,18 @@
 #else
 #define PROXY NULL
 #endif
+/* Default number of Swift threads, if not over-ridden on command line */
 #define NUM_SWIFT_THREADS_DEFAULT 1
+/* Size of Swift objects */
+/* TODO: Make this a default, and accept a command-line argument to over-ride it */
 #define OBJECT_SIZE 1024
+/* Type of test data with which to fill Swift objects */
+/* TODO: Make this a default, and accept a command-line argument to over-ride it */
 #define OBJECT_DATA SIMPLE_TEXT
+/* If true, verify that retrieved data is what was previously inserted. If false, do not perform this verification */
+/* TODO: Make this a default, and accept a command-line argument to over-ride it */
+#define VERIFY_RETRIEVED_DATA 1
+/* File from which to read pseudo-random data */
 #define RANDOM_FILE "/dev/urandom"
 
 /* #define DEBUG_CURL */
@@ -152,6 +161,15 @@ compare_data(void *ptr, size_t size, size_t nmemb, void *userdata)
 	return size * nmemb;
 }
 
+/**
+ * Ignore the given data.
+ */
+static size_t
+ignore_data(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	return size * nmemb;
+}
+
 /* Types of test data with which to pupulate the Swift object */
 enum test_data_type {
 	SIMPLE_TEXT,  /* Simple text, easily identifiable in the Swift object's data */
@@ -264,6 +282,7 @@ struct swift_thread_args {
 	pthread_mutex_t start_mutex;
 	enum test_data_type data_type;
 	size_t data_size;
+	unsigned int verify_data;
 	struct timespec start_time;
 	struct timespec start_put_time;
 	struct timespec end_put_time;
@@ -411,7 +430,11 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_get(args->swift, compare_data, &compare_args);
+		if (args->verify_data) {
+			args->scerr = swift_get(args->swift, compare_data, &compare_args);
+		} else {
+			args->scerr = swift_get(args->swift, ignore_data, NULL);
+		}
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
@@ -486,6 +509,7 @@ main(int argc, char **argv)
 	int ret;
 	unsigned int i;
 
+	/* TODO: Use getopt */
 	if (5 == argc) {
 		num_swift_threads = NUM_SWIFT_THREADS_DEFAULT;
 	} else if (6 == argc) {
@@ -565,6 +589,7 @@ main(int argc, char **argv)
 		swift_args[i].thread_num = i;
 		swift_args[i].data_type = OBJECT_DATA;
 		swift_args[i].data_size = OBJECT_SIZE;
+		swift_args[i].verify_data = VERIFY_RETRIEVED_DATA;
 		swift_args[i].swift_url = keystone_args.swift_url;
 		swift_args[i].auth_token = keystone_args.auth_token;
 		swift_args[i].start_condvar = start_condvar;
