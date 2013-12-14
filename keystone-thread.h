@@ -5,15 +5,15 @@
 
 /* In/out parameters to a Keystone thread */
 struct keystone_thread_args {
-	keystone_context_t *keystone;
-	const char *proxy;
-	const char *url;
-	const char *tenant;
-	const char *username;
-	const char *password;
-	char *auth_token;
-	char *swift_url;
-	enum keystone_error kserr;
+	keystone_context_t *keystone; /* Keystone client library context */
+	const char *proxy;            /* Proxy to use, or NULL for none */
+	const char *url;              /* Keystone service's public endpoint URL */
+	const char *tenant;           /* Tenant name for authentication */
+	const char *username;         /* Username for authentication */
+	const char *password;         /* Password for authentication */
+	char *auth_token;             /* Out: Authentication token from Keystone service */
+	char *swift_url;              /* Out: Swift service's public endpoint URL */
+	enum keystone_error kserr;    /* Keystone client library error encountered */
 };
 
 void *keystone_thread_func(void *arg);
