@@ -178,6 +178,10 @@ struct swift_thread_args {
 	pthread_cond_t start_condvar;
 	pthread_mutex_t start_mutex;
 	struct timespec start_time;
+	struct timespec start_put_time;
+	struct timespec end_put_time;
+	struct timespec start_get_time;
+	struct timespec end_get_time;
 	struct timespec end_time;
 };
 
@@ -211,6 +215,14 @@ swift_thread_func(void *arg)
 		return NULL;
 	}
 	pthread_cleanup_push(local_swift_end, args->swift);
+
+	if (SCERR_SUCCESS == args->scerr) {
+		/* Save thread start time */
+		ret = clock_gettime(CLOCK_TO_USE, &args->start_time);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+		}
+	}
 
 	compare_args.data = args->swift->allocator(NULL, 1024);
 	if (NULL == compare_args.data) {
@@ -279,8 +291,8 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		/* Save start time */
-		ret = clock_gettime(CLOCK_TO_USE, &args->start_time);
+		/* Save time at start of put operation */
+		ret = clock_gettime(CLOCK_TO_USE, &args->start_put_time);
 		if (ret != 0) {
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
 		}
@@ -291,7 +303,31 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
+		/* Save time at end of put operation */
+		ret = clock_gettime(CLOCK_TO_USE, &args->end_put_time);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+		}
+	}
+
+	if (SCERR_SUCCESS == args->scerr) {
+		/* Save time at start of get operation */
+		ret = clock_gettime(CLOCK_TO_USE, &args->start_get_time);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+		}
+	}
+
+	if (SCERR_SUCCESS == args->scerr) {
 		args->scerr = swift_get(args->swift, compare_data, &compare_args);
+	}
+
+	if (SCERR_SUCCESS == args->scerr) {
+		/* Save time at end of get operation */
+		ret = clock_gettime(CLOCK_TO_USE, &args->end_get_time);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+		}
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
@@ -316,6 +352,13 @@ swift_thread_func(void *arg)
 	return NULL;
 }
 
+static double
+timespecs_to_microsecs(const struct timespec *start, const struct timespec *end)
+{
+	double d = end->tv_sec - start->tv_sec;
+	return d * 1000000 + (end->tv_nsec - start->tv_nsec) / 1000;
+}
+
 /**
  * Display the execution time of each of the Swift threads in microseconds.
  */
@@ -324,9 +367,9 @@ show_swift_times(const struct swift_thread_args *args, unsigned int n)
 {
 	fprintf(stderr, "Swift execution times for %u threads:\n", n);
 	while (n--) {
-		double start = args->start_time.tv_sec * 1000000 + args->start_time.tv_nsec / 1000;
-		double end   = args->end_time.tv_sec   * 1000000 + args->end_time.tv_nsec   / 1000;
-		fprintf(stderr, "Thread %3u: duration (microseconds): %8.4f\n", args->thread_num, end - start);
+		fprintf(stderr, "Thread %3u: total duration (microseconds): %8.4f\n", args->thread_num, timespecs_to_microsecs(&args->start_time, &args->end_time));
+		fprintf(stderr, "Thread %3u:   put duration (microseconds): %8.4f\n", args->thread_num, timespecs_to_microsecs(&args->start_put_time, &args->end_put_time));
+		fprintf(stderr, "Thread %3u:   get duration (microseconds): %8.4f\n", args->thread_num, timespecs_to_microsecs(&args->start_get_time, &args->end_get_time));
 		args++;
 	}
 }
