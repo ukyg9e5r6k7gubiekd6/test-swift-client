@@ -29,7 +29,8 @@
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
 #define ELEMENTSOF(arr) ((sizeof(arr) / sizeof((arr)[0])))
-/* FIXME: #define typealloc(type, count) (( ##type *) malloc(sizeof( ##type))) */
+#define typealloc(type) (((type) *) malloc(sizeof(type)))
+#define typearrayalloc(count, type) ((type *) malloc((count) * sizeof(type)))
 
 #ifdef CLOCK_MONOTONIC_RAW
 /* Use NTP-immune but Linux-specific clock */
@@ -142,7 +143,9 @@ free_test_data(void *arg)
 {
 	struct compare_data_args *args = (struct compare_data_args *) arg;
 
-	free(args->data);
+	if (args->data) {
+		free(args->data);
+	}
 }
 
 /**
@@ -208,7 +211,6 @@ swift_thread_func(void *arg)
 		return NULL;
 	}
 	pthread_cleanup_push(local_swift_end, args->swift);
-	pthread_cleanup_push(free_test_data, &compare_args);
 
 	compare_args.data = args->swift->allocator(NULL, 1024);
 	if (NULL == compare_args.data) {
@@ -219,6 +221,7 @@ swift_thread_func(void *arg)
 		compare_args.len = strlen(compare_args.data);
 		compare_args.off = 0;
 	}
+	pthread_cleanup_push(free_test_data, &compare_args);
 
 	gen_container_name(args->thread_num, container_name, ELEMENTSOF(container_name));
 	gen_object_name(args->thread_num, object_name, ELEMENTSOF(object_name));
@@ -238,7 +241,7 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		fprintf(stderr, "Swift is at: %s\n", args->swift_url);
+		/* fprintf(stderr, "Swift is at: %s\n", args->swift_url); */
 		args->scerr = swift_set_url(args->swift, args->swift_url);
 	}
 
@@ -254,25 +257,33 @@ swift_thread_func(void *arg)
 		args->scerr = swift_set_object(args->swift, object_name);
 	}
 
-	ret = pthread_mutex_lock(&args->start_mutex);
-	if (ret != 0) {
-		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
+	if (SCERR_SUCCESS == args->scerr) {
+		ret = pthread_mutex_lock(&args->start_mutex);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
+		}
 	}
 
-	ret = pthread_cond_wait(&args->start_condvar, &args->start_mutex);
-	if (ret != 0) {
-		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread condvar errors */
+	if (SCERR_SUCCESS == args->scerr) {
+		ret = pthread_cond_wait(&args->start_condvar, &args->start_mutex);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread condvar errors */
+		}
 	}
 
-	ret = pthread_mutex_unlock(&args->start_mutex);
-	if (ret != 0) {
-		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
+	if (SCERR_SUCCESS == args->scerr) {
+		ret = pthread_mutex_unlock(&args->start_mutex);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
+		}
 	}
 
-	/* Save start time */
-	ret = clock_gettime(CLOCK_TO_USE, &args->start_time);
-	if (ret != 0) {
-		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+	if (SCERR_SUCCESS == args->scerr) {
+		/* Save start time */
+		ret = clock_gettime(CLOCK_TO_USE, &args->start_time);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+		}
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
@@ -291,10 +302,12 @@ swift_thread_func(void *arg)
 		args->scerr = swift_delete_container(args->swift);
 	}
 
-	/* Save end time */
-	ret = clock_gettime(CLOCK_TO_USE, &args->end_time);
-	if (ret != 0) {
-		args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+	if (SCERR_SUCCESS == args->scerr) {
+		/* Save end time */
+		ret = clock_gettime(CLOCK_TO_USE, &args->end_time);
+		if (ret != 0) {
+			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
+		}
 	}
 
 	pthread_cleanup_pop(1);
@@ -312,7 +325,7 @@ show_swift_times(const struct swift_thread_args *args, unsigned int n)
 	fprintf(stderr, "Swift execution times for %u threads:\n", n);
 	while (n--) {
 		double start = args->start_time.tv_sec * 1000000 + args->start_time.tv_nsec / 1000;
-		double end = args->end_time.tv_sec * 1000000 + args->end_time.tv_nsec / 1000;
+		double end   = args->end_time.tv_sec   * 1000000 + args->end_time.tv_nsec   / 1000;
 		fprintf(stderr, "Thread %3u: duration (microseconds): %8.4f\n", args->thread_num, end - start);
 		args--;
 	}
@@ -352,19 +365,19 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
-	swift_contexts = (swift_context_t *) malloc(num_swift_threads * sizeof(swift_context_t));
+	swift_contexts = typearrayalloc(num_swift_threads, swift_context_t);
 	if (NULL == swift_contexts) {
 		return EXIT_FAILURE;
 	}
-	swift_args = (struct swift_thread_args *) malloc(num_swift_threads * sizeof(struct swift_thread_args));
+	swift_args = typearrayalloc(num_swift_threads, struct swift_thread_args);
 	if (NULL == swift_args) {
 		return EXIT_FAILURE;
 	}
-	swift_thread_ids = (pthread_t *) malloc(num_swift_threads * sizeof(pthread_t));
+	swift_thread_ids = typearrayalloc(num_swift_threads, pthread_t);
 	if (NULL == swift_thread_ids) {
 		return EXIT_FAILURE;
 	}
-	swift_retvals = (void **) malloc(num_swift_threads * sizeof(void *));
+	swift_retvals = typearrayalloc(num_swift_threads, void *);
 	if (NULL == swift_retvals) {
 		return EXIT_FAILURE;
 	}
@@ -412,7 +425,7 @@ main(int argc, char **argv)
 	memset(&swift_args, 0, sizeof(swift_args));
 
 	/* Start all of the Swift threads */
-	for (i = 0; i < ELEMENTSOF(swift_args); i++) {
+	for (i = 0; i < num_swift_threads; i++) {
 		swift_args[i].swift = &swift_contexts[i];
 		swift_args[i].thread_num = i;
 		swift_args[i].swift_url = keystone_args.swift_url;
@@ -446,7 +459,7 @@ main(int argc, char **argv)
 	}
 
 	/* Wait for each of the Swift threads to complete */
-	for (i = 0; i < NUM_SWIFT_THREADS_DEFAULT; i++) {
+	for (i = 0; i < num_swift_threads; i++) {
 		ret = pthread_join(swift_thread_ids[i], &swift_retvals[i]);
 		if (ret != 0) {
 			perror("pthread_join");
@@ -466,6 +479,16 @@ main(int argc, char **argv)
 		return EXIT_FAILURE;
 	}
 
+	show_swift_times(swift_args, num_swift_threads);
+
+	ret = SCERR_SUCCESS;
+	/* Propagate any error from any of the Swift threads */
+	for (i = 0; i < num_swift_threads; i++) {
+		if (SCERR_SUCCESS != swift_args[i].scerr) {
+			ret = EXIT_FAILURE; /* Swift thread failed */
+		}
+	}
+
 	free(keystone_args.auth_token);
 	free(keystone_args.swift_url);
 	free(swift_contexts);
@@ -473,14 +496,5 @@ main(int argc, char **argv)
 	free(swift_thread_ids);
 	free(swift_retvals);
 
-	show_swift_times(swift_args, ELEMENTSOF(swift_args));
-
-	/* Propagate any error from any of the Swift threads */
-	for (i = 0; i < NUM_SWIFT_THREADS_DEFAULT; i++) {
-		if (SCERR_SUCCESS != swift_args[i].scerr) {
-			return EXIT_FAILURE; /* Swift thread failed */
-		}
-	}
-
-	return SCERR_SUCCESS;
+	return ret;
 }
