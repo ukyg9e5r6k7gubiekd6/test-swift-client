@@ -4,12 +4,12 @@
 
 #include <stdio.h>   /* [sw]printf */
 #include <stdlib.h>  /* perror, malloc, free, strdup */
-#include <string.h>  /* strlen */
+#include <string.h>  /* strdup */
 #include <pthread.h> /* pthread_ */
 #include <assert.h>  /* assert */
 #include <time.h>    /* clock_gettime */
 
-#include "keystone-client.h"
+#include "keystone-thread.h"
 #include "swift-client.h"
 
 #define USAGE "Usage: %s <keystone-URL> <tenant-name> <username> <password> [ <num-threads> = 1 ]"
@@ -54,75 +54,6 @@
 /* Use POSIX-defined but NTP-vulnerable clock */
 #define CLOCK_TO_USE CLOCK_MONOTONIC
 #endif /* ndef CLOCK_MONOTONIC_RAW */
-
-/* In/out parameters to a Keystone thread */
-struct keystone_thread_args {
-	keystone_context_t *keystone;
-	const char *url;
-	const char *tenant;
-	const char *username;
-	const char *password;
-	char *auth_token;
-	char *swift_url;
-	enum keystone_error kserr;
-};
-
-static void
-local_keystone_end(void *arg)
-{
-	keystone_end((keystone_context_t *) arg);
-}
-
-/**
- * Executed by each Keystone thread.
- */
-static void *
-keystone_thread_func(void *arg)
-{
-	struct keystone_thread_args *args = (struct keystone_thread_args *) arg;
-
-	args->kserr = keystone_start(args->keystone);
-	if (KSERR_SUCCESS != args->kserr) {
-		return NULL;
-	}
-	pthread_cleanup_push(local_keystone_end, args->keystone);
-
-#ifdef DEBUG_CURL
-	if (KSERR_SUCCESS == args->kserr) {
-		args->kserr = keystone_set_debug(args->keystone, 1);
-	}
-#endif /* DEBUG_CURL */
-
-	if (KSERR_SUCCESS == args->kserr) {
-		args->kserr = keystone_set_proxy(args->keystone, PROXY);
-	}
-
-	if (KSERR_SUCCESS == args->kserr) {
-		args->kserr = keystone_authenticate(args->keystone, args->url, args->tenant, args->username, args->password);
-	}
-
-	if (KSERR_SUCCESS == args->kserr) {
-		const char *auth_token = keystone_get_auth_token(args->keystone);
-		if (auth_token) {
-			args->auth_token = strdup(auth_token);
-		} else {
-			args->kserr = KSERR_AUTH_REJECTED;
-		}
-	}
-
-	if (KSERR_SUCCESS == args->kserr) {
-		const char *swift_url = keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0, OS_ENDPOINT_URL_PUBLIC);
-		if (swift_url) {
-			args->swift_url = strdup(swift_url);
-		} else {
-			args->kserr = KSERR_INIT_FAILED; /* Not the right error code, but Keystone should not know about failure to find Swift */
-		}
-	}
-
-	pthread_cleanup_pop(1);
-
-	return NULL;
-}
 
 /* In/out arguments to a compare_data callback */
 struct compare_data_args {
@@ -589,6 +520,7 @@ main(int argc, char **argv)
 
 	memset(&keystone_args, 0, sizeof(keystone_args));
 	keystone_args.keystone = &keystone_context;
+	keystone_args.proxy = PROXY;
 	keystone_args.url = argv[1];
 	keystone_args.tenant = argv[2];
 	keystone_args.username = argv[3];
