@@ -173,6 +173,17 @@ ignore_data(void *ptr, size_t size, size_t nmemb, void *userdata)
 	return size * nmemb;
 }
 
+/**
+ * Supply zeroed data on request.
+ */
+static size_t
+make_zero_data(void *ptr, size_t size, size_t nmemb, void *userdata)
+{
+	size *= nmemb;
+	memset(ptr, 0, size);
+	return size;
+}
+
 /* Types of test data with which to pupulate the Swift object */
 enum test_data_type {
 	SIMPLE_TEXT,  /* Simple text, easily identifiable in the Swift object's data */
@@ -416,7 +427,12 @@ swift_thread_func(void *arg)
 	if (SCERR_SUCCESS == args->scerr) {
 		unsigned int i;
 		for (i = 0; i < args->num_iterations; i++) {
-			args->scerr = swift_put_data(args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
+			if (NULL == compare_args.data) {
+				/* Special case for all-zero data: Synthesise the data to be inserted at this point */
+				args->scerr = swift_put(args->swift, make_zero_data, NULL, 0, NULL, NULL);
+			} else {
+				args->scerr = swift_put_data(args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
+			}
 			if (args->scerr != SCERR_SUCCESS) {
 				break;
 			}
