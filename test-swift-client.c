@@ -246,6 +246,54 @@ or\n\
 		return EXIT_FAILURE;
 	}
 
+	if (NULL == keystone_url) {
+		fputs("Missing required option: "
+#ifdef USE_GETOPT_LONG
+				"--keystone-url"
+#else
+				"-k"
+#endif
+				"\n", stderr);
+		fprintf(stderr, USAGE, argv[0], argv[0]);
+		return EXIT_FAILURE;
+	}
+
+	if (NULL == tenant_name) {
+		fputs("Missing required option: "
+#ifdef USE_GETOPT_LONG
+				"--tenant-name"
+#else
+				"-t"
+#endif
+				"\n", stderr);
+		fprintf(stderr, USAGE, argv[0], argv[0]);
+		return EXIT_FAILURE;
+	}
+
+	if (NULL == username) {
+		fputs("Missing required option: "
+#ifdef USE_GETOPT_LONG
+				"--username"
+#else
+				"-u"
+#endif
+				"\n", stderr);
+		fprintf(stderr, USAGE, argv[0], argv[0]);
+		return EXIT_FAILURE;
+	}
+
+	if (NULL == password) {
+		fputs("Missing required option: "
+#ifdef USE_GETOPT_LONG
+				"--password"
+#else
+				"-p"
+#endif
+				"\n", stderr);
+		fprintf(stderr, USAGE, argv[0], argv[0]);
+		return EXIT_FAILURE;
+	}
+
 	swift_contexts = typearrayalloc(num_swift_threads, swift_context_t);
 	if (NULL == swift_contexts) {
 		return EXIT_FAILURE;
