@@ -198,15 +198,14 @@ swift_thread_func(void *arg)
 
 	assert(arg != NULL);
 	args = (struct swift_thread_args *) arg;
-	assert(args->swift != NULL);
 	assert(args->swift_url != NULL);
 	assert(args->auth_token != NULL);
 
-	args->scerr = swift_start(args->swift);
+	args->scerr = swift_start(&args->swift);
 	if (args->scerr != SCERR_SUCCESS) {
 		return NULL;
 	}
-	pthread_cleanup_push(local_swift_end, args->swift);
+	pthread_cleanup_push(local_swift_end, &args->swift);
 
 	if (SCERR_SUCCESS == args->scerr) {
 		/* Save thread start time */
@@ -216,14 +215,14 @@ swift_thread_func(void *arg)
 		}
 	}
 
-	compare_args.swift = args->swift;
+	compare_args.swift = &args->swift;
 	compare_args.off = 0;
 	compare_args.len = args->data_size;
 	if (ALL_ZEROES == args->data_type) {
 		/* Special case: there is no need ever to actually store a large number of zero bits */
 		compare_args.data = NULL;
 	} else {
-		compare_args.data = args->swift->allocator(NULL, args->data_size);
+		compare_args.data = args->swift.allocator(NULL, args->data_size);
 		if (NULL == compare_args.data) {
 			args->scerr = SCERR_ALLOC_FAILED;
 		} else {
@@ -236,34 +235,32 @@ swift_thread_func(void *arg)
 	gen_object_name(args->thread_num, object_name, ELEMENTSOF(object_name));
 
 	if (SCERR_SUCCESS == args->scerr) {
-		if (args->debug) {
-			args->scerr = swift_set_debug(args->swift, 1);
-		}
+		args->scerr = swift_set_debug(&args->swift, args->debug);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_set_proxy(args->swift, args->proxy);
+		args->scerr = swift_set_proxy(&args->swift, args->proxy);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_set_auth_token(args->swift, args->auth_token);
+		args->scerr = swift_set_auth_token(&args->swift, args->auth_token);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
 		/* fprintf(stderr, "Swift is at: %s\n", args->swift_url); */
-		args->scerr = swift_set_url(args->swift, args->swift_url);
+		args->scerr = swift_set_url(&args->swift, args->swift_url);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_set_container(args->swift, container_name);
+		args->scerr = swift_set_container(&args->swift, container_name);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_create_container(args->swift, 0, NULL, NULL);
+		args->scerr = swift_create_container(&args->swift, 0, NULL, NULL);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_set_object(args->swift, object_name);
+		args->scerr = swift_set_object(&args->swift, object_name);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
@@ -300,9 +297,9 @@ swift_thread_func(void *arg)
 		for (i = 0; i < args->num_iterations; i++) {
 			if (NULL == compare_args.data) {
 				/* Special case for all-zero data: Synthesise the data to be inserted at this point */
-				args->scerr = swift_put(args->swift, make_zero_data, NULL, 0, NULL, NULL);
+				args->scerr = swift_put(&args->swift, make_zero_data, NULL, 0, NULL, NULL);
 			} else {
-				args->scerr = swift_put_data(args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
+				args->scerr = swift_put_data(&args->swift, compare_args.data, compare_args.len, 0, NULL, NULL);
 			}
 			if (args->scerr != SCERR_SUCCESS) {
 				break;
@@ -330,9 +327,9 @@ swift_thread_func(void *arg)
 		unsigned int i;
 		for (i = 0; i < args->num_iterations; i++) {
 			if (args->verify_data) {
-				args->scerr = swift_get(args->swift, compare_data, &compare_args);
+				args->scerr = swift_get(&args->swift, compare_data, &compare_args);
 			} else {
-				args->scerr = swift_get(args->swift, ignore_data, NULL);
+				args->scerr = swift_get(&args->swift, ignore_data, NULL);
 			}
 			if (args->scerr != SCERR_SUCCESS) {
 				break;
@@ -349,11 +346,11 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_delete_object(args->swift);
+		args->scerr = swift_delete_object(&args->swift);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		args->scerr = swift_delete_container(args->swift);
+		args->scerr = swift_delete_container(&args->swift);
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {

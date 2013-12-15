@@ -81,7 +81,6 @@ main(int argc, char **argv)
 	struct keystone_thread_args keystone_args;
 	pthread_t keystone_thread;
 
-	swift_context_t *swift_contexts = NULL;
 	struct swift_thread_args *swift_args = NULL;
 	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
 	pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -304,16 +303,12 @@ or\n\
 		return EXIT_FAILURE;
 	}
 
-	swift_contexts = typearrayalloc(num_swift_threads, swift_context_t);
-	if (NULL == swift_contexts) {
-		return EXIT_FAILURE;
-	}
 	swift_args = typearrayalloc(num_swift_threads, struct swift_thread_args);
 	if (NULL == swift_args) {
 		return EXIT_FAILURE;
 	}
 
-	memset(&swift_contexts, 0, num_swift_threads * sizeof(swift_context_t));
+	memset(&swift_args, 0, sizeof(swift_args));
 	memset(&keystone_context, 0, sizeof(keystone_context));
 
 	if (swift_global_init() != SCERR_SUCCESS) {
@@ -359,7 +354,6 @@ or\n\
 
 	/* Start all of the Swift threads */
 	for (i = 0; i < num_swift_threads; i++) {
-		swift_args[i].swift = &swift_contexts[i];
 		swift_args[i].debug = verbose;
 		swift_args[i].proxy = proxy;
 		swift_args[i].thread_num = i;
@@ -430,7 +424,6 @@ or\n\
 
 	free(keystone_args.auth_token);
 	free(keystone_args.swift_url);
-	free(swift_contexts);
 	free(swift_args);
 
 	return ret;
