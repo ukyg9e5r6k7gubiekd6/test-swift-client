@@ -80,14 +80,12 @@ main(int argc, char **argv)
 	enum keystone_error kserr;
 	struct keystone_thread_args keystone_args;
 	pthread_t keystone_thread;
-	void *keystone_retval;
 
 	swift_context_t *swift_contexts = NULL;
 	struct swift_thread_args *swift_args = NULL;
 	pthread_t *swift_thread_ids = NULL;
 	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
 	pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
-	void **swift_retvals = NULL;
 
 	int ret;
 	unsigned int i;
@@ -319,10 +317,6 @@ or\n\
 	if (NULL == swift_thread_ids) {
 		return EXIT_FAILURE;
 	}
-	swift_retvals = typearrayalloc(num_swift_threads, void *);
-	if (NULL == swift_retvals) {
-		return EXIT_FAILURE;
-	}
 
 	memset(&swift_contexts, 0, num_swift_threads * sizeof(swift_context_t));
 	memset(&keystone_context, 0, sizeof(keystone_context));
@@ -353,7 +347,7 @@ or\n\
 		return EXIT_FAILURE;
 	}
 
-	ret = pthread_join(keystone_thread, &keystone_retval);
+	ret = pthread_join(keystone_thread, NULL);
 	if (ret != 0) {
 		perror("pthread_join");
 		return EXIT_FAILURE;
@@ -410,7 +404,7 @@ or\n\
 
 	/* Wait for each of the Swift threads to complete */
 	for (i = 0; i < num_swift_threads; i++) {
-		ret = pthread_join(swift_thread_ids[i], &swift_retvals[i]);
+		ret = pthread_join(swift_thread_ids[i], NULL);
 		if (ret != 0) {
 			perror("pthread_join");
 			return EXIT_FAILURE;
@@ -444,7 +438,6 @@ or\n\
 	free(swift_contexts);
 	free(swift_args);
 	free(swift_thread_ids);
-	free(swift_retvals);
 
 	return ret;
 }
