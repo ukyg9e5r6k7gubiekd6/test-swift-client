@@ -6,7 +6,7 @@
 /* Types of test data with which to populate a Swift object */
 enum test_data_type {
 	SIMPLE_TEXT,  /* Simple text, easily identifiable in the Swift object's data */
-	ALL_ZEROS,    /* Null bytes */
+	ALL_ZEROES,    /* Null bytes */
 	PSEUDO_RANDOM /* Pseudo-random bits */
 };
 

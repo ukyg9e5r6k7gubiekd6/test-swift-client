@@ -137,7 +137,7 @@ gen_test_data(unsigned int thread_num, enum test_data_type data_type, char *data
 	case SIMPLE_TEXT:
 		gen_test_data_simple_text(thread_num, data, len);
 		break;
-	case ALL_ZEROS:
+	case ALL_ZEROES:
 		/* Nothing to do */
 		break;
 	case PSEUDO_RANDOM:
@@ -219,7 +219,7 @@ swift_thread_func(void *arg)
 	compare_args.swift = args->swift;
 	compare_args.off = 0;
 	compare_args.len = args->data_size;
-	if (ALL_ZEROS == args->data_type) {
+	if (ALL_ZEROES == args->data_type) {
 		/* Special case: there is no need ever to actually store a large number of zero bits */
 		compare_args.data = NULL;
 	} else {
