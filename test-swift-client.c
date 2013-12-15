@@ -33,8 +33,6 @@
 /* Default data-verification flag. If true, verify that retrieved data is what was previously inserted. If false, do not perform this verification */
 #define VERIFY_DATA_DEFAULT 1
 
-/* #define DEBUG_CURL */
-
 #define typealloc(type) (((type) *) malloc(sizeof(type)))
 #define typearrayalloc(count, type) ((type *) malloc((count) * sizeof(type)))
 
@@ -104,8 +102,9 @@ main(int argc, char **argv)
 	const char *tenant_name = NULL;
 	const char *username = NULL;
 	unsigned int verify_data = VERIFY_DATA_DEFAULT;
+	unsigned int verbose = 0;
 
-#define OPTSTRING "d:hi:k:n:p:s:t:u:v"
+#define OPTSTRING "d:hi:k:n:p:s:t:u:v:V"
 #define HELP "\
 Where:\n\
     keystone-endpoint-url\n\
@@ -145,8 +144,13 @@ or\n\
         --tenant-name <tenant-name> --username <username> \n\
         [ --data { random | simple-text | zeroes } ]\n\
         [ --http-proxy <proxy-url> ] [ --iterations <n> ]\n\
-        [ --num-threads <n> ] [ --size <numbytes> ]\n\
-        [ --verify-data <verify-bool> ]\n\n" HELP
+        [ --num-threads <n> ] [ --size <numbytes> ] [ --verbose ]\n\
+        [ --verify-data <verify-bool> ]\n\
+\n\
+" HELP "\
+    verbose\n\
+        If supplied, triggers verbose logging of actions performed.\n\
+"
 	int option_index;
 	static struct option long_options[] = {
 		{"data",         required_argument, NULL, 'd'},
@@ -159,7 +163,8 @@ or\n\
 		{"size",         required_argument, NULL, 's'},
 		{"tenant-name",  required_argument, NULL, 't'},
 		{"username",     required_argument, NULL, 'u'},
-		{"verify-data",  no_argument,       NULL, 'v'},
+		{"verbose",      no_argument,       NULL, 'V'},
+		{"verify-data",  required_argument, NULL, 'v'},
 		{NULL,           0,                 NULL, 0}
 	};
 #else /* ndef USE_GETOPT_LONG */
@@ -172,7 +177,12 @@ or\n\
         -k <keystone-endpoint-URL> -p <password> -t <tenant-name>\n\
         -u <username> [ -d { random | simple-text | zeroes } ]\n\
         [ -i <n> ] [ -n <n> ] [ -r <proxy-url> ] [ -s <numbytes> ]\n\
-        [ -v <verify-bool> ]\n" HELP
+        [ -v <verify-bool> ] [ -V ]\n\
+\n\
+" HELP "\
+    -V\n\
+        If supplied, triggers verbose logging of actions performed.\n\
+"
 #endif /* USE_GETOPT_LONG */
 
 	for (;;) {
@@ -232,6 +242,9 @@ or\n\
 			break;
 		case 'v':
 			verify_data = parse_bool(optarg);
+			break;
+		case 'V':
+			verbose = 1;
 			break;
 		case '?':
 		default:
@@ -327,11 +340,7 @@ or\n\
 
 	memset(&keystone_args, 0, sizeof(keystone_args));
 	keystone_args.keystone = &keystone_context;
-#ifdef DEBUG_CURL
-	keystone_args.debug = 1;
-#else /* ndef DEBUG_CURL */
-	keystone_args.debug = 0;
-#endif /* ndef DEBUG_CURL */
+	keystone_args.debug = verbose;
 	keystone_args.proxy = proxy;
 	keystone_args.url = keystone_url;
 	keystone_args.tenant = tenant_name;
@@ -362,11 +371,7 @@ or\n\
 	/* Start all of the Swift threads */
 	for (i = 0; i < num_swift_threads; i++) {
 		swift_args[i].swift = &swift_contexts[i];
-#ifdef DEBUG_CURL
-		swift_args[i].debug = 1;
-#else /* ndef DEBUG_CURL */
-		swift_args[i].debug = 0;
-#endif /* ndef DEBUG_CURL */
+		swift_args[i].debug = verbose;
 		swift_args[i].proxy = proxy;
 		swift_args[i].thread_num = i;
 		swift_args[i].data_type = data_type;
