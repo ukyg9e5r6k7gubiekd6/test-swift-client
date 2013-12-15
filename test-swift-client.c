@@ -100,14 +100,6 @@ main(int argc, char **argv)
 #define OPTSTRING "d:hi:k:n:p:s:t:u:v:V"
 #define HELP "\
 Where:\n\
-    keystone-endpoint-url\n\
-        Is any endpoint URL of the Keystone service;\n\
-    password\n\
-        Is the password for Keystone authentication;\n\
-    tenant-name\n\
-        Is the tenant name for Keystone authentication;\n\
-    username\n\
-        Is the user name for Keystone authentication;\n\
     data\n\
         Is one of:\n\
         random: Fill Swift object(s) with pseudo-random bits;\n\
@@ -117,10 +109,18 @@ Where:\n\
         Is the URL of a proxy to use for access to Keystone and Swift;\n\
     iterations\n\
         Is the number of consecutive gets/puts performed by each Swift thread;\n\
+    keystone-endpoint-url\n\
+        Is any endpoint URL of the Keystone service;\n\
     num-threads\n\
         Is the number of concurrent Swift worker threads;\n\
+    password\n\
+        Is the password for Keystone authentication;\n\
     size\n\
         Is the size in bytes of each Swift object;\n\
+    tenant-name\n\
+        Is the tenant name for Keystone authentication;\n\
+    username\n\
+        Is the user name for Keystone authentication;\n\
     verify-bool\n\
         Is true if the retrieved objects' data should be compared with\n\
         the data previously inserted into those objects,\n\
@@ -133,22 +133,22 @@ Usage:\n\
         Outputs this help text\n\
 or\n\
     %s\n\
-        --keystone-url <keystone-endpoint-URL> --password <password>\n\
-        --tenant-name <tenant-name> --username <username> \n\
         [ --data { random | simple-text | zeroes } ]\n\
         [ --http-proxy <proxy-url> ] [ --iterations <n> ]\n\
-        [ --num-threads <n> ] [ --size <numbytes> ] [ --verbose ]\n\
-        [ --verify-data <verify-bool> ]\n\
+        [ --keystone-url <keystone-endpoint-URL> ] [ --num-threads <n> ]\n\
+        [ --password <password> ] [ --size <numbytes> ]\n\
+        [ --tenant-name <tenant-name> ] [ --username <username> ]\n\
+        [ --verbose ] [ --verify-data <verify-bool> ]\n\
 \n\
 " HELP "\
-    verbose\n\
+    --verbose\n\
         If supplied, triggers verbose logging of actions performed.\n\
 "
 	int option_index;
 	static struct option long_options[] = {
 		{"data",         required_argument, NULL, 'd'},
 		{"help",         no_argument,       NULL, 'h'},
-		{"http-proxy",   required_argument, NULL, 'r'},
+		{"http-proxy",   required_argument, NULL, 'r'}, /* 'p' already taken for '--password' and 'h' for '--help' */
 		{"iterations",   required_argument, NULL, 'i'},
 		{"keystone-url", required_argument, NULL, 'k'},
 		{"num-threads",  required_argument, NULL, 'n'},
@@ -167,9 +167,10 @@ Usage:\n\
         Outputs this help text\n\
 or\n\
     %s\n\
-        -k <keystone-endpoint-URL> -p <password> -t <tenant-name>\n\
-        -u <username> [ -d { random | simple-text | zeroes } ]\n\
-        [ -i <n> ] [ -n <n> ] [ -r <proxy-url> ] [ -s <numbytes> ]\n\
+        [ -d { random | simple-text | zeroes } ]\n\
+        [ -i <n> ] [ -k <keystone-endpoint-URL> ] [ -n <n> ]\n\
+        [ -p <password> ] [ -r <proxy-url> ] [ -s <numbytes> ]\n\
+        [ -t <tenant-name> ] [ -u <username> ]\n\
         [ -v <verify-bool> ] [ -V ]\n\
 \n\
 " HELP "\
@@ -253,54 +254,66 @@ or\n\
 	}
 
 	/* Default unset parameters from environment variables */
+	if (NULL == keystone_url) {
+		keystone_url = getenv("OS_AUTH_URL");
+	}
+	if (NULL == tenant_name) {
+		tenant_name = getenv("OS_TENANT_NAME");
+	}
+	if (NULL == username) {
+		username = getenv("OS_USERNAME");
+	}
+	if (NULL == password) {
+		password = getenv("OS_PASSWORD");
+	}
 	if (NULL == proxy) {
 		proxy = getenv("http_proxy");
 	}
 
 	if (NULL == keystone_url) {
-		fputs("Missing required option: "
+		fputs("No Keystone URL specified via "
 #ifdef USE_GETOPT_LONG
 				"--keystone-url"
 #else
 				"-k"
 #endif
-				"\n", stderr);
+				", and OS_AUTH_URL unset.\n", stderr);
 		fprintf(stderr, USAGE, argv[0], argv[0]);
 		return EXIT_FAILURE;
 	}
 
 	if (NULL == tenant_name) {
-		fputs("Missing required option: "
+		fputs("No tenant name specified via "
 #ifdef USE_GETOPT_LONG
 				"--tenant-name"
 #else
 				"-t"
 #endif
-				"\n", stderr);
+				", and OS_TENANT_NAME unset.\n", stderr);
 		fprintf(stderr, USAGE, argv[0], argv[0]);
 		return EXIT_FAILURE;
 	}
 
 	if (NULL == username) {
-		fputs("Missing required option: "
+		fputs("No username specified via "
 #ifdef USE_GETOPT_LONG
 				"--username"
 #else
 				"-u"
 #endif
-				"\n", stderr);
+				", and OS_USERNAME unset.\n", stderr);
 		fprintf(stderr, USAGE, argv[0], argv[0]);
 		return EXIT_FAILURE;
 	}
 
 	if (NULL == password) {
-		fputs("Missing required option: "
+		fputs("No password specified via "
 #ifdef USE_GETOPT_LONG
 				"--password"
 #else
 				"-p"
 #endif
-				"\n", stderr);
+				", and OS_PASSWORD unset.\n", stderr);
 		fprintf(stderr, USAGE, argv[0], argv[0]);
 		return EXIT_FAILURE;
 	}
