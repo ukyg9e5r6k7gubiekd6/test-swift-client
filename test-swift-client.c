@@ -22,11 +22,6 @@
 #include "keystone-thread.h"
 #include "swift-thread.h"
 
-#if 0
-#define PROXY "socks5://127.0.0.1:8080/"
-#else
-#define PROXY NULL
-#endif
 /* Default number of Swift threads, if not over-ridden on command line */
 #define NUM_SWIFT_THREADS_DEFAULT 1
 /* Default number of times each thread performs its identical put and its identical get */
@@ -104,6 +99,7 @@ main(int argc, char **argv)
 	const char *keystone_url = NULL;
 	unsigned int num_swift_threads = NUM_SWIFT_THREADS_DEFAULT;
 	const char *password = NULL;
+	const char *proxy = NULL;
 	unsigned long object_size = OBJECT_SIZE_DEFAULT;
 	const char *tenant_name = NULL;
 	const char *username = NULL;
@@ -217,6 +213,9 @@ or\n\
 		case 'p':
 			password = optarg;
 			break;
+		case 'r':
+			proxy = optarg;
+			break;
 		case 's':
 			errno = 0;
 			object_size = strtoul(optarg, NULL, 0);
@@ -243,6 +242,7 @@ or\n\
 
 	if (optind < argc) {
 		fprintf(stderr, "Unrecognised non-option argument: %s\n", argv[optind]);
+		fprintf(stderr, USAGE, argv[0], argv[0]);
 		return EXIT_FAILURE;
 	}
 
@@ -284,7 +284,7 @@ or\n\
 #else /* ndef DEBUG_CURL */
 	keystone_args.debug = 0;
 #endif /* ndef DEBUG_CURL */
-	keystone_args.proxy = PROXY;
+	keystone_args.proxy = proxy;
 	keystone_args.url = keystone_url;
 	keystone_args.tenant = tenant_name;
 	keystone_args.username = username;
@@ -319,7 +319,7 @@ or\n\
 #else /* ndef DEBUG_CURL */
 		swift_args[i].debug = 0;
 #endif /* ndef DEBUG_CURL */
-		swift_args[i].proxy = PROXY;
+		swift_args[i].proxy = proxy;
 		swift_args[i].thread_num = i;
 		swift_args[i].data_type = data_type;
 		swift_args[i].data_size = object_size;
