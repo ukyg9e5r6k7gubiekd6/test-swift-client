@@ -25,9 +25,7 @@ keystone_thread_func(void *arg)
 	pthread_cleanup_push(local_keystone_end, args->keystone);
 
 	if (KSERR_SUCCESS == args->kserr) {
-		if (args->debug) {
-			args->kserr = keystone_set_debug(args->keystone, 1);
-		}
+		args->kserr = keystone_set_debug(args->keystone, args->debug);
 	}
 
 	if (KSERR_SUCCESS == args->kserr) {
