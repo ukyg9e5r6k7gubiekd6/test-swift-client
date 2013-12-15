@@ -252,6 +252,11 @@ or\n\
 		return EXIT_FAILURE;
 	}
 
+	/* Default unset parameters from environment variables */
+	if (NULL == proxy) {
+		proxy = getenv("http_proxy");
+	}
+
 	if (NULL == keystone_url) {
 		fputs("Missing required option: "
 #ifdef USE_GETOPT_LONG
