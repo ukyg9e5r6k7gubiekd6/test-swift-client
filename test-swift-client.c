@@ -83,7 +83,6 @@ main(int argc, char **argv)
 
 	swift_context_t *swift_contexts = NULL;
 	struct swift_thread_args *swift_args = NULL;
-	pthread_t *swift_thread_ids = NULL;
 	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
 	pthread_mutex_t start_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -313,10 +312,6 @@ or\n\
 	if (NULL == swift_args) {
 		return EXIT_FAILURE;
 	}
-	swift_thread_ids = typearrayalloc(num_swift_threads, pthread_t);
-	if (NULL == swift_thread_ids) {
-		return EXIT_FAILURE;
-	}
 
 	memset(&swift_contexts, 0, num_swift_threads * sizeof(swift_context_t));
 	memset(&keystone_context, 0, sizeof(keystone_context));
@@ -376,7 +371,7 @@ or\n\
 		swift_args[i].auth_token = keystone_args.auth_token;
 		swift_args[i].start_condvar = start_condvar;
 		swift_args[i].start_mutex = start_mutex;
-		ret = pthread_create(&swift_thread_ids[i], NULL, swift_thread_func, &swift_args[i]);
+		ret = pthread_create(&swift_args[i].thread_id, NULL, swift_thread_func, &swift_args[i]);
 		if (ret != 0) {
 			perror("pthread_create");
 			return EXIT_FAILURE;
@@ -404,7 +399,7 @@ or\n\
 
 	/* Wait for each of the Swift threads to complete */
 	for (i = 0; i < num_swift_threads; i++) {
-		ret = pthread_join(swift_thread_ids[i], NULL);
+		ret = pthread_join(swift_args[i].thread_id, NULL);
 		if (ret != 0) {
 			perror("pthread_join");
 			return EXIT_FAILURE;
@@ -437,7 +432,6 @@ or\n\
 	free(keystone_args.swift_url);
 	free(swift_contexts);
 	free(swift_args);
-	free(swift_thread_ids);
 
 	return ret;
 }

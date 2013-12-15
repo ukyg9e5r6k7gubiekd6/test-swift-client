@@ -15,7 +15,8 @@ enum test_data_type {
  */
 struct swift_thread_args {
 	swift_context_t *swift;         /* Swift library context */
-	unsigned int debug;           /* Whether to enable Swift client library debugging */
+	unsigned int debug;             /* Whether to enable Swift client library debugging */
+	pthread_t thread_id;            /* pthread thread ID */
 	unsigned int thread_num;        /* Swift thread index */
 	const char *proxy;              /* Proxy to use, or NULL for none */
 	const char *swift_url;          /* Public endpoint URL of Swift service */
