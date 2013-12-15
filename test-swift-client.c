@@ -76,10 +76,7 @@ parse_bool(const char * val)
 int
 main(int argc, char **argv)
 {
-	keystone_context_t keystone_context;
-	enum keystone_error kserr;
 	struct keystone_thread_args keystone_args;
-	pthread_t keystone_thread;
 
 	struct swift_thread_args *swift_args = NULL;
 	pthread_cond_t start_condvar = PTHREAD_COND_INITIALIZER;
@@ -308,22 +305,17 @@ or\n\
 		return EXIT_FAILURE;
 	}
 
-	memset(&swift_args, 0, sizeof(swift_args));
-	memset(&keystone_context, 0, sizeof(keystone_context));
-
 	if (swift_global_init() != SCERR_SUCCESS) {
 		return EXIT_FAILURE;
 	}
 	atexit(swift_global_cleanup);
 
-	kserr = keystone_global_init();
-	if (kserr != KSERR_SUCCESS) {
+	if (keystone_global_init() != KSERR_SUCCESS) {
 		return EXIT_FAILURE;
 	}
 	atexit(keystone_global_cleanup);
 
 	memset(&keystone_args, 0, sizeof(keystone_args));
-	keystone_args.keystone = &keystone_context;
 	keystone_args.debug = verbose;
 	keystone_args.proxy = proxy;
 	keystone_args.url = keystone_url;
@@ -331,13 +323,13 @@ or\n\
 	keystone_args.username = username;
 	keystone_args.password = password;
 
-	ret = pthread_create(&keystone_thread, NULL, keystone_thread_func, &keystone_args);
+	ret = pthread_create(&keystone_args.thread_id, NULL, keystone_thread_func, &keystone_args);
 	if (ret != 0) {
 		perror("pthread_create");
 		return EXIT_FAILURE;
 	}
 
-	ret = pthread_join(keystone_thread, NULL);
+	ret = pthread_join(keystone_args.thread_id, NULL);
 	if (ret != 0) {
 		perror("pthread_join");
 		return EXIT_FAILURE;
@@ -350,9 +342,8 @@ or\n\
 	assert(keystone_args.swift_url);
 	assert(keystone_args.auth_token);
 
-	memset(&swift_args, 0, sizeof(swift_args));
-
 	/* Start all of the Swift threads */
+	memset(&swift_args, 0, sizeof(swift_args));
 	for (i = 0; i < num_swift_threads; i++) {
 		swift_args[i].debug = verbose;
 		swift_args[i].proxy = proxy;

@@ -18,26 +18,26 @@ keystone_thread_func(void *arg)
 {
 	struct keystone_thread_args *args = (struct keystone_thread_args *) arg;
 
-	args->kserr = keystone_start(args->keystone);
+	args->kserr = keystone_start(&args->keystone);
 	if (KSERR_SUCCESS != args->kserr) {
 		return NULL;
 	}
-	pthread_cleanup_push(local_keystone_end, args->keystone);
+	pthread_cleanup_push(local_keystone_end, &args->keystone);
 
 	if (KSERR_SUCCESS == args->kserr) {
-		args->kserr = keystone_set_debug(args->keystone, args->debug);
+		args->kserr = keystone_set_debug(&args->keystone, args->debug);
 	}
 
 	if (KSERR_SUCCESS == args->kserr) {
-		args->kserr = keystone_set_proxy(args->keystone, args->proxy);
+		args->kserr = keystone_set_proxy(&args->keystone, args->proxy);
 	}
 
 	if (KSERR_SUCCESS == args->kserr) {
-		args->kserr = keystone_authenticate(args->keystone, args->url, args->tenant, args->username, args->password);
+		args->kserr = keystone_authenticate(&args->keystone, args->url, args->tenant, args->username, args->password);
 	}
 
 	if (KSERR_SUCCESS == args->kserr) {
-		const char *auth_token = keystone_get_auth_token(args->keystone);
+		const char *auth_token = keystone_get_auth_token(&args->keystone);
 		if (auth_token) {
 			args->auth_token = strdup(auth_token);
 		} else {
@@ -46,7 +46,7 @@ keystone_thread_func(void *arg)
 	}
 
 	if (KSERR_SUCCESS == args->kserr) {
-		const char *swift_url = keystone_get_service_url(args->keystone, OS_SERVICE_SWIFT, 0, OS_ENDPOINT_URL_PUBLIC);
+		const char *swift_url = keystone_get_service_url(&args->keystone, OS_SERVICE_SWIFT, 0, OS_ENDPOINT_URL_PUBLIC);
 		if (swift_url) {
 			args->swift_url = strdup(swift_url);
 		} else {

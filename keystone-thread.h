@@ -5,7 +5,8 @@
 
 /* In/out parameters to a Keystone thread */
 struct keystone_thread_args {
-	keystone_context_t *keystone; /* Keystone client library context */
+	keystone_context_t keystone;  /* Keystone client library context */
+	pthread_t thread_id;          /* pthread thread ID */
 	unsigned int debug;           /* Whether to enable Keystone client library debugging */
 	const char *proxy;            /* Proxy to use, or NULL for none */
 	const char *url;              /* Keystone service's public endpoint URL */
