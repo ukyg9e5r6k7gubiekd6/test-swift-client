@@ -7,11 +7,20 @@
 #include <string.h>  /* memset */
 #include <pthread.h> /* pthread_* */
 #include <assert.h>  /* assert */
+#include <errno.h>   /* errno */
+
+/* If defined, use GNU getopt_long; otherwise, use POSIX getopt */
+#define USE_GETOPT_LONG
+
+#ifdef USE_GETOPT_LONG
+#include <unistd.h>  /* getopt_long */
+#include <getopt.h>  /* getopt_long */
+#else /* ndef USE_GETOPT_LONG */
+#include <unistd.h>  /* getopt */
+#endif /* ndef USE_GETOPT_LONG */
 
 #include "keystone-thread.h"
 #include "swift-thread.h"
-
-#define USAGE "Usage: %s <keystone-URL> <tenant-name> <username> <password> [ <num-threads> = 1 ]"
 
 #if 0
 #define PROXY "socks5://127.0.0.1:8080/"
@@ -20,18 +29,14 @@
 #endif
 /* Default number of Swift threads, if not over-ridden on command line */
 #define NUM_SWIFT_THREADS_DEFAULT 1
-/* Number of times each thread performs its identical put and its identical get */
-/* TODO: Make this a default, and accept a command-line argument to over-ride it */
-#define NUM_SWIFT_ITERATIONS 1
-/* Size of Swift objects */
-/* TODO: Make this a default, and accept a command-line argument to over-ride it */
-#define OBJECT_SIZE 1024
-/* Type of test data with which to fill Swift objects */
-/* TODO: Make this a default, and accept a command-line argument to over-ride it */
-#define OBJECT_DATA SIMPLE_TEXT
-/* If true, verify that retrieved data is what was previously inserted. If false, do not perform this verification */
-/* TODO: Make this a default, and accept a command-line argument to over-ride it */
-#define VERIFY_RETRIEVED_DATA 1
+/* Default number of times each thread performs its identical put and its identical get */
+#define SWIFT_ITERATIONS_DEFAULT 1
+/* Default size in bytes of each Swift object */
+#define OBJECT_SIZE_DEFAULT 1024
+/* Default type of test data with which to fill Swift objects */
+#define OBJECT_DATA_TYPE_DEFAULT SIMPLE_TEXT
+/* Default data-verification flag. If true, verify that retrieved data is what was previously inserted. If false, do not perform this verification */
+#define VERIFY_DATA_DEFAULT 1
 
 /* #define DEBUG_CURL */
 
@@ -60,6 +65,21 @@ show_swift_times(const struct swift_thread_args *args, unsigned int n)
 	}
 }
 
+static unsigned int
+parse_bool(const char * val)
+{
+	if (
+		0 != atoi(val)
+		|| 0 == strcasecmp(val, "enabled")
+		|| 0 == strcasecmp(val, "on")
+		|| 0 == strcasecmp(val, "true")
+		|| 0 == strcasecmp(val, "yes")
+	) {
+		return 1;
+	}
+	return 0;
+}
+
 int
 main(int argc, char **argv)
 {
@@ -68,7 +88,6 @@ main(int argc, char **argv)
 	struct keystone_thread_args keystone_args;
 	pthread_t keystone_thread;
 	void *keystone_retval;
-	unsigned int num_swift_threads;
 
 	swift_context_t *swift_contexts = NULL;
 	struct swift_thread_args *swift_args = NULL;
@@ -80,18 +99,150 @@ main(int argc, char **argv)
 	int ret;
 	unsigned int i;
 
-	/* TODO: Use getopt */
-	if (5 == argc) {
-		num_swift_threads = NUM_SWIFT_THREADS_DEFAULT;
-	} else if (6 == argc) {
-		num_swift_threads = atoi(argv[5]);
-		if (0 == num_swift_threads) {
-			fputs("Swift thread count must be non-zero\n", stderr);
-			fprintf(stderr, USAGE, argv[0]);
+	enum test_data_type data_type = OBJECT_DATA_TYPE_DEFAULT;
+	unsigned int iterations = SWIFT_ITERATIONS_DEFAULT;
+	const char *keystone_url = NULL;
+	unsigned int num_swift_threads = NUM_SWIFT_THREADS_DEFAULT;
+	const char *password = NULL;
+	unsigned long object_size = OBJECT_SIZE_DEFAULT;
+	const char *tenant_name = NULL;
+	const char *username = NULL;
+	unsigned int verify_data = VERIFY_DATA_DEFAULT;
+
+#define OPTSTRING "d:hi:k:n:p:s:t:u:v"
+#define HELP "\
+Where:\n\
+    keystone-endpoint-url\n\
+        Is any endpoint URL of the Keystone service;\n\
+    password\n\
+        Is the password for Keystone authentication;\n\
+    tenant-name\n\
+        Is the tenant name for Keystone authentication;\n\
+    username\n\
+        Is the user name for Keystone authentication;\n\
+    data\n\
+        Is one of:\n\
+        random: Fill Swift object(s) with pseudo-random bits;\n\
+        simple-text (default): Fill Swift object(s) with identifiable text;\n\
+        zeroes: Fill Swift object(s) with zero bits;\n\
+    http-proxy\n\
+        Is the URL of a proxy to use for access to Keystone and Swift;\n\
+    iterations\n\
+        Is the number of consecutive gets/puts performed by each Swift thread;\n\
+    num-threads\n\
+        Is the number of concurrent Swift worker threads;\n\
+    size\n\
+        Is the size in bytes of each Swift object;\n\
+    verify-bool\n\
+        Is true if the retrieved objects' data should be compared with\n\
+        the data previously inserted into those objects,\n\
+        or false if the retrieved objects' data should be thrown away.\n\
+"
+#ifdef USE_GETOPT_LONG
+#define USAGE "\
+Usage:\n\
+    %s --help\n\
+        Outputs this help text\n\
+or\n\
+    %s\n\
+        --keystone-url <keystone-endpoint-URL> --password <password>\n\
+        --tenant-name <tenant-name> --username <username> \n\
+        [ --data { random | simple-text | zeroes } ]\n\
+        [ --http-proxy <proxy-url> ] [ --iterations <n> ]\n\
+        [ --num-threads <n> ] [ --size <numbytes> ]\n\
+        [ --verify-data <verify-bool> ]\n\n" HELP
+	int option_index;
+	static struct option long_options[] = {
+		{"data",         required_argument, NULL, 'd'},
+		{"help",         no_argument,       NULL, 'h'},
+		{"http-proxy",   required_argument, NULL, 'r'},
+		{"iterations",   required_argument, NULL, 'i'},
+		{"keystone-url", required_argument, NULL, 'k'},
+		{"num-threads",  required_argument, NULL, 'n'},
+		{"password",     required_argument, NULL, 'p'},
+		{"size",         required_argument, NULL, 's'},
+		{"tenant-name",  required_argument, NULL, 't'},
+		{"username",     required_argument, NULL, 'u'},
+		{"verify-data",  no_argument,       NULL, 'v'},
+		{NULL,           0,                 NULL, 0}
+	};
+#else /* ndef USE_GETOPT_LONG */
+#define USAGE "\
+Usage:\n\
+    %s -h\n\
+        Outputs this help text\n\
+or\n\
+    %s\n\
+        -k <keystone-endpoint-URL> -p <password> -t <tenant-name>\n\
+        -u <username> [ -d { random | simple-text | zeroes } ]\n\
+        [ -i <n> ] [ -n <n> ] [ -r <proxy-url> ] [ -s <numbytes> ]\n\
+        [ -v <verify-bool> ]\n" HELP
+#endif /* USE_GETOPT_LONG */
+
+	for (;;) {
+#ifdef USE_GETOPT_LONG
+		ret = getopt_long(argc, argv, OPTSTRING, long_options, &option_index);
+#else /* ndef USE_GETOPT_LONG */
+		ret = getopt(argc, argv, OPTSTRING);
+#endif /* ndef USE_GETOPT_LONG */
+		if (-1 == ret) {
+			break;
+		}
+		switch (ret) {
+		case 'd':
+			if (0 == strcmp(optarg, "random")) {
+				data_type = PSEUDO_RANDOM;
+			} else if (0 == strcmp(optarg, "simple-text")) {
+				data_type = SIMPLE_TEXT;
+			} else if (0 == strcmp(optarg, "zeroes")) {
+				data_type = ALL_ZEROES;
+			} else {
+				fprintf(stderr, "Unrecognised data type '%s'. Choices are: random, simple-text, zeroes\n", optarg);
+				fprintf(stderr, USAGE, argv[0], argv[0]);
+				return EXIT_FAILURE;
+			}
+			break;
+		case 'h':
+			fprintf(stderr, USAGE, argv[0], argv[0]);
+			return EXIT_SUCCESS;
+		case 'i':
+			iterations = atoi(optarg);
+			break;
+		case 'k':
+			keystone_url = optarg;
+			break;
+		case 'n':
+			num_swift_threads = atoi(optarg);
+			break;
+		case 'p':
+			password = optarg;
+			break;
+		case 's':
+			errno = 0;
+			object_size = strtoul(optarg, NULL, 0);
+			if (errno) {
+				perror("strtoul");
+				return EXIT_FAILURE;
+			}
+			break;
+		case 't':
+			tenant_name = optarg;
+			break;
+		case 'u':
+			username = optarg;
+			break;
+		case 'v':
+			verify_data = parse_bool(optarg);
+			break;
+		case '?':
+		default:
+			fprintf(stderr, USAGE, argv[0], argv[0]);
 			return EXIT_FAILURE;
 		}
-	} else {
-		fprintf(stderr, USAGE, argv[0]);
+	}
+
+	if (optind < argc) {
+		fprintf(stderr, "Unrecognised non-option argument: %s\n", argv[optind]);
 		return EXIT_FAILURE;
 	}
 
@@ -134,10 +285,10 @@ main(int argc, char **argv)
 	keystone_args.debug = 0;
 #endif /* ndef DEBUG_CURL */
 	keystone_args.proxy = PROXY;
-	keystone_args.url = argv[1];
-	keystone_args.tenant = argv[2];
-	keystone_args.username = argv[3];
-	keystone_args.password = argv[4];
+	keystone_args.url = keystone_url;
+	keystone_args.tenant = tenant_name;
+	keystone_args.username = username;
+	keystone_args.password = password;
 
 	ret = pthread_create(&keystone_thread, NULL, keystone_thread_func, &keystone_args);
 	if (ret != 0) {
@@ -170,10 +321,10 @@ main(int argc, char **argv)
 #endif /* ndef DEBUG_CURL */
 		swift_args[i].proxy = PROXY;
 		swift_args[i].thread_num = i;
-		swift_args[i].data_type = OBJECT_DATA;
-		swift_args[i].data_size = OBJECT_SIZE;
-		swift_args[i].verify_data = VERIFY_RETRIEVED_DATA;
-		swift_args[i].num_iterations = NUM_SWIFT_ITERATIONS;
+		swift_args[i].data_type = data_type;
+		swift_args[i].data_size = object_size;
+		swift_args[i].verify_data = verify_data;
+		swift_args[i].num_iterations = iterations;
 		swift_args[i].swift_url = keystone_args.swift_url;
 		swift_args[i].auth_token = keystone_args.auth_token;
 		swift_args[i].start_condvar = start_condvar;
