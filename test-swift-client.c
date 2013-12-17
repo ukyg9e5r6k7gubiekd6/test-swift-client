@@ -361,7 +361,7 @@ or\n\
 	assert(keystone_args.auth_token);
 
 	/* Start all of the Swift threads */
-	memset(&swift_args, 0, sizeof(swift_args));
+	memset(swift_args, 0, sizeof(swift_args));
 	for (i = 0; i < num_swift_threads; i++) {
 		swift_args[i].debug = verbose;
 		swift_args[i].proxy = proxy;
