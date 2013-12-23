@@ -2,6 +2,8 @@
 .cproject
 Debug
 Release
-debug.sh
-run.sh
+debug-nci.sh
+debug-devstack.sh
+run-nci.sh
+run-devstack.sh
 testdata2.txt
