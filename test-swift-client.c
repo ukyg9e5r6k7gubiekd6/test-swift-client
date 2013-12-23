@@ -23,7 +23,7 @@
 #include "swift-thread.h"
 
 /* Default number of Swift threads, if not over-ridden on command line */
-#define NUM_SWIFT_THREADS_DEFAULT 1
+#define NUM_SWIFT_THREADS_DEFAULT 5
 /* Default number of times each thread performs its identical put and its identical get */
 #define SWIFT_ITERATIONS_DEFAULT 1
 /* Default size in bytes of each Swift object */
@@ -51,9 +51,9 @@ show_swift_times(const struct swift_thread_args *args, unsigned int n)
 {
 	fprintf(stderr, "Swift execution times for %u threads:\n", n);
 	while (n--) {
-		fprintf(stderr, "Thread %3u: total duration (microseconds): %8.4f\n", args->thread_num, timespecs_to_microsecs(&args->start_time, &args->end_time));
-		fprintf(stderr, "Thread %3u:   put duration (microseconds): %8.4f\n", args->thread_num, timespecs_to_microsecs(&args->start_put_time, &args->end_put_time));
-		fprintf(stderr, "Thread %3u:   get duration (microseconds): %8.4f\n", args->thread_num, timespecs_to_microsecs(&args->start_get_time, &args->end_get_time));
+		fprintf(stderr, "Thread %3u: total duration (microseconds): %12.3f\n", args->thread_num, timespecs_to_microsecs(&args->start_time, &args->end_time));
+		fprintf(stderr, "Thread %3u:   put duration (microseconds): %12.3f\n", args->thread_num, timespecs_to_microsecs(&args->start_put_time, &args->end_put_time));
+		fprintf(stderr, "Thread %3u:   get duration (microseconds): %12.3f\n", args->thread_num, timespecs_to_microsecs(&args->start_get_time, &args->end_get_time));
 		args++;
 	}
 }
@@ -365,21 +365,24 @@ or\n\
 	for (i = 0; i < num_swift_threads; i++) {
 		swift_args[i].debug = verbose;
 		swift_args[i].proxy = proxy;
-		swift_args[i].thread_num = i;
+		swift_args[i].thread_num = i + 1;
 		swift_args[i].data_type = data_type;
 		swift_args[i].data_size = object_size;
 		swift_args[i].verify_data = verify_data;
 		swift_args[i].num_iterations = iterations;
 		swift_args[i].swift_url = keystone_args.swift_url;
 		swift_args[i].auth_token = keystone_args.auth_token;
-		swift_args[i].start_condvar = start_condvar;
-		swift_args[i].start_mutex = start_mutex;
+		swift_args[i].start_condvar = &start_condvar;
+		swift_args[i].start_mutex = &start_mutex;
 		ret = pthread_create(&swift_args[i].thread_id, NULL, swift_thread_func, &swift_args[i]);
 		if (ret != 0) {
 			perror("pthread_create");
 			return EXIT_FAILURE;
 		}
 	}
+
+	/* Wait for threads to start. FIXME: Not robust. Plain wrong actually. */
+	sleep(2);
 
 	/* Broadcast the start condvar, telling all Swift threads to start */
 	ret = pthread_mutex_lock(&start_mutex);

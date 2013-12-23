@@ -22,8 +22,8 @@ struct swift_thread_args {
 	const char *swift_url;          /* Public endpoint URL of Swift service */
 	const char *auth_token;         /* Authentication token from Keystone */
 	enum swift_error scerr;         /* Swift client error encountered */
-	pthread_cond_t start_condvar;   /* Wait for this condition before starting */
-	pthread_mutex_t start_mutex;    /* Protects access to start condvar */
+	pthread_cond_t *start_condvar;  /* Wait for this condition before starting */
+	pthread_mutex_t *start_mutex;   /* Protects access to start condvar */
 	enum test_data_type data_type;  /* Type of test data with which to fill Swift objects */
 	size_t data_size;               /* Length of each Swift object */
 	unsigned int num_iterations;    /* Number of sequential identical get and number of put operations */

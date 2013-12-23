@@ -4,6 +4,7 @@
 #include <pthread.h> /* pthread_* */
 #include <assert.h>  /* assert */
 #include <time.h>    /* clock_gettime */
+#include <errno.h>   /* errno */
 
 #include "swift-thread.h"
 
@@ -211,6 +212,7 @@ swift_thread_func(void *arg)
 		/* Save thread start time */
 		ret = clock_gettime(CLOCK_TO_USE, &args->start_time);
 		if (ret != 0) {
+			args->swift.errno_error("clock_gettime", errno);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
 		}
 	}
@@ -264,22 +266,25 @@ swift_thread_func(void *arg)
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		ret = pthread_mutex_lock(&args->start_mutex);
+		ret = pthread_mutex_lock(args->start_mutex);
 		if (ret != 0) {
+			args->swift.errno_error("pthread_mutex_lock", ret);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
 		}
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		ret = pthread_cond_wait(&args->start_condvar, &args->start_mutex);
+		ret = pthread_cond_wait(args->start_condvar, args->start_mutex);
 		if (ret != 0) {
+			args->swift.errno_error("pthread_cond_wait", ret);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread condvar errors */
 		}
 	}
 
 	if (SCERR_SUCCESS == args->scerr) {
-		ret = pthread_mutex_unlock(&args->start_mutex);
+		ret = pthread_mutex_unlock(args->start_mutex);
 		if (ret != 0) {
+			args->swift.errno_error("pthread_mutex_unlock", ret);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about pthread mutex errors */
 		}
 	}
@@ -288,6 +293,7 @@ swift_thread_func(void *arg)
 		/* Save time at start of put operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->start_put_time);
 		if (ret != 0) {
+			args->swift.errno_error("clock_gettime", errno);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
 		}
 	}
@@ -311,6 +317,7 @@ swift_thread_func(void *arg)
 		/* Save time at end of put operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->end_put_time);
 		if (ret != 0) {
+			args->swift.errno_error("clock_gettime", errno);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
 		}
 	}
@@ -319,6 +326,7 @@ swift_thread_func(void *arg)
 		/* Save time at start of get operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->start_get_time);
 		if (ret != 0) {
+			args->swift.errno_error("clock_gettime", errno);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
 		}
 	}
@@ -341,6 +349,7 @@ swift_thread_func(void *arg)
 		/* Save time at end of get operations */
 		ret = clock_gettime(CLOCK_TO_USE, &args->end_get_time);
 		if (ret != 0) {
+			args->swift.errno_error("clock_gettime", errno);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
 		}
 	}
@@ -357,6 +366,7 @@ swift_thread_func(void *arg)
 		/* Save end time */
 		ret = clock_gettime(CLOCK_TO_USE, &args->end_time);
 		if (ret != 0) {
+			args->swift.errno_error("clock_gettime", errno);
 			args->scerr = SCERR_INIT_FAILED; /* Not the right error code, but swift client should not know about POSIX clock errors */
 		}
 	}
