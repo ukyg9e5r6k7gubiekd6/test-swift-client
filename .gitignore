@@ -7,3 +7,5 @@ debug-devstack.sh
 run-nci.sh
 run-devstack.sh
 testdata2.txt
+devstackrc
+nciadminrc
