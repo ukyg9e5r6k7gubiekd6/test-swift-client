@@ -1,0 +1,23 @@
+CC=gcc
+LD=$(CC)
+CFLAGS=-Wall -Werror -I../swift-client -I../keystone-client
+LDFLAGS=-pthread -static
+LIBS=json curl
+SOURCES=$(wildcard *.c) $(wildcard ../swift-client/*.c) $(wildcard ../keystone-client/*.c)
+OBJECTS=$(SOURCES:.c=.o)
+CONFIG=Debug
+#CONFIG=Release
+BINARY=$(CONFIG)/test-swift-client
+
+.PHONY: all
+all: $(BINARY)
+
+.PHONY: clean
+clean:
+	rm -f *.o ../swift-client/*.o ../keystone-client/*.o
+
+.c.o:
+	$(CC) $(CFLAGS) -c -o "$@" $^
+
+$(BINARY): $(OBJECTS)
+	$(LD) $(LDFLAGS) -o "$@" $^ $(addprefix -l,$(LIBS))
