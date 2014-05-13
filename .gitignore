@@ -9,3 +9,4 @@ run-devstack.sh
 testdata2.txt
 devstackrc
 nciadminrc
+devstack-internalrc
