@@ -45,6 +45,18 @@ keystone_thread_func(void *arg)
 		}
 	}
 
+	if (args->debug) {
+		/* Print out the service catalog */
+		unsigned int service, endpoint;
+
+		for (service = 0; service <= OS_SERVICE_MAX; service++) {
+			for (endpoint = 0; endpoint <= OS_ENDPOINT_URL_MAX; endpoint++) {
+				const char *url = keystone_get_service_url(&args->keystone, service, 0, endpoint);
+				fprintf(stderr, "%s endpoint URL for service %s: %s\n", endpoint_url_name(endpoint), service_name(service), url ? url : "None");
+			}
+		}
+	}
+
 	if (KSERR_SUCCESS == args->kserr) {
 		const char *swift_url = keystone_get_service_url(&args->keystone, OS_SERVICE_SWIFT, 0, OS_ENDPOINT_URL_PUBLIC);
 		if (swift_url) {
